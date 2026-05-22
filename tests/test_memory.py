@@ -8,6 +8,7 @@ import yaml
 
 from c_hypermem import Memory
 from c_hypermem.config import MemoryConfig
+from c_hypermem.embeddings import EmbeddingModelClient
 from c_hypermem.errors import IngestionNotConfiguredError
 from c_hypermem.schema import HyperEdge, IngestionOutput, LocalNodeGraph, MemoryNode
 from c_hypermem.utils.ids import make_edge_id, make_node_id
@@ -93,6 +94,13 @@ def test_default_config_includes_split_config_files():
     assert config.extraction.prompt == "extraction/memory_extraction.md"
     assert "entity" in config.node_types.types
     assert config.hyperedges.basic_edge_types == ["evidence", "state", "correction"]
+
+
+def test_embedding_model_client_is_generic_entrypoint():
+    config = MemoryConfig.load("configs/default.yaml")
+    client = EmbeddingModelClient.from_config(config.embedding)
+
+    assert client.config.model == "${CHYPERMEM_EMBEDDING_MODEL}"
 
 
 class StaticExtractor:

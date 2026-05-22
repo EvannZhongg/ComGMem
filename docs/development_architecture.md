@@ -155,7 +155,7 @@ C-HyperMem/
 
     embeddings/
       base.py
-      openai_compatible.py
+      model_client.py
 
     adapters/                  # 可选集成，不被核心模块依赖
       agent_memory_eval.py     # optional thin adapter helpers only
