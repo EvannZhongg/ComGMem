@@ -1,4 +1,30 @@
-# C-HyperMem: Composite Hypergraph Memory forLong-Term Conversational Agent Reasoning
+# C-HyperMem: Composite Hypergraph Memory for Long-Term Conversational Agent Reasoning
+
+## 快速开始
+
+```powershell
+cd C-HyperMem
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -e ".[llms,embeddings,dev]"
+```
+
+在 `C-HyperMem\.env` 中配置模型环境变量，例如：
+
+```powershell
+CHYPERMEM_LLM_MODEL=...
+CHYPERMEM_LLM_BASE_URL=...
+CHYPERMEM_LLM_API_KEY=...
+CHYPERMEM_EMBEDDING_MODEL=...
+CHYPERMEM_EMBEDDING_BASE_URL=...
+CHYPERMEM_EMBEDDING_API_KEY=...
+```
+
+运行测试：
+
+```powershell
+python -m pytest -q
+```
 
 ## Git 后续提交操作流程
 
