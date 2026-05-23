@@ -21,6 +21,11 @@ node_labels:
     time: {prefer_world_time: true}
     local_graph: {enabled: true, allow_triples: true, allow_attributes: true, allow_roles: true}
     indexing: {lexical: true, vector: true, time_index: true}
+  instruction:
+    enabled: true
+    description: "User-provided rules, constraints, or behavioral requirements that the Agent should follow across turns. Current version treats this as a normal node label; future retrieval policy may prioritize it or place it near the top of the System Prompt."
+    local_graph: {enabled: true, allow_triples: true, allow_attributes: true, allow_roles: true}
+    indexing: {lexical: true, vector: true}
   tool:
     enabled: false
     description: "Tool calls, tool results, observations, or external execution artifacts from a real agent run."

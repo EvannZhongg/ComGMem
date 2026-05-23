@@ -79,6 +79,7 @@ fact:toby_is_cat
 - `state`：某个主体在某个时间段内的状态。
 - `preference`：长期偏好、倾向、习惯或稳定画像。
 - `task`：计划、目标、任务或进度状态。
+- `instruction`：用户对 Agent 提出的强制规则、约束或行为要求。
 - `tool`：真实 agent 中的 tool call / tool result / observation。
 
 这些标签应来自配置，而不是写死在存储 schema 中。不同 `node_labels` 的差异主要体现在检索、维护和提示偏好上，而不体现在 `node_id` 生成上：
@@ -92,6 +93,8 @@ fact:toby_is_cat
 节点内部的 `LocalNodeGraph` 统一使用同一套结构，不为 fact、entity、event、tool 分别设计不同三元组 schema。
 
 `node_labels` 配置会作为抽取偏好传入 LLM prompt，但不是严格入库白名单。如果模型抽取出配置外的节点标签，系统仍应按统一 `MemoryNode` schema 正常入库，并使用默认 fallback 策略处理。
+
+`instruction` 当前与普通标签平级，不改变节点 ID、写入或检索规则。未来可以把它作为高优先级策略候选：检索时优先召回，甚至常驻在最终 System Prompt 顶部，用来保证 Agent 遵守用户长期规则。
 
 同一个带有 `fact` 标签的节点可以被多个超边共享。例如：
 
