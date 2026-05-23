@@ -48,11 +48,9 @@ class LLMMemoryExtractor:
     def _render_prompt(self, messages: list[Message], context: ExtractionContext) -> str:
         prompt_id = _prompt_id_from_path(self.config.extraction.prompt)
         prompt = self.prompt_registry.load(prompt_id)
+        prompt_text = _render_prompt_template(prompt.text, self.config)
         parts = [
-            prompt.text,
-            "",
-            "# Enabled Node Label Preferences",
-            _render_node_labels(self.config) if self.config.extraction.pass_node_labels_to_prompt else "Not provided.",
+            prompt_text,
             "",
             "# Interaction Metadata",
             _compact_json(context.metadata),
@@ -67,6 +65,8 @@ class LLMMemoryExtractor:
                 "Do not output node_id, edge_id, entity_id, triple_id, confidence, salience, weight, or graph structure."
             ),
         ]
+        if "{{NODE_LABELS}}" not in prompt.text and self.config.extraction.pass_node_labels_to_prompt:
+            parts.insert(1, "\n# Enabled Node Label Preferences\n" + _render_node_labels(self.config))
         return "\n".join(parts)
 
 
@@ -136,6 +136,11 @@ def _render_node_labels(config: MemoryConfig) -> str:
     if config.node_labels.default_policy.description:
         rows.append(f"- Other precise labels are allowed: {config.node_labels.default_policy.description}")
     return "\n".join(rows) or "No configured labels."
+
+
+def _render_prompt_template(template: str, config: MemoryConfig) -> str:
+    node_labels = _render_node_labels(config) if config.extraction.pass_node_labels_to_prompt else "Not provided."
+    return template.replace("{{NODE_LABELS}}", node_labels)
 
 
 def _render_messages(messages: list[Message]) -> str:

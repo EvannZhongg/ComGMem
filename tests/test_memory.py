@@ -11,7 +11,7 @@ from c_hypermem import Memory
 from c_hypermem.config import MemoryConfig
 from c_hypermem.embeddings import EmbeddingModelClient
 from c_hypermem.errors import IngestionNotConfiguredError
-from c_hypermem.pipeline.extraction import _render_node_labels
+from c_hypermem.pipeline.extraction import ExtractionContext, LLMMemoryExtractor, _render_node_labels
 from c_hypermem.schema import MemoryExtraction
 from c_hypermem.utils.prompts import PromptRegistry
 
@@ -155,6 +155,21 @@ def test_default_policy_is_not_rendered_as_prompt_label():
     assert "Other precise labels are allowed" in rendered
 
 
+def test_extraction_prompt_injects_node_label_config():
+    config = MemoryConfig.load("configs/default.yaml")
+    extractor = LLMMemoryExtractor(config, llm=StaticLLM({}))
+    prompt = extractor._render_prompt(
+        [],
+        ExtractionContext(namespace="prompt_ns", metadata={"session_id": "S1"}, current_turn=0),
+    )
+
+    assert "{{NODE_LABELS}}" not in prompt
+    assert "- entity:" in prompt
+    assert "- instruction:" in prompt
+    assert "Other precise labels are allowed" in prompt
+    assert "node_id" in prompt
+
+
 def test_conflicting_fact_retires_old_fact_and_adds_correction_edge(tmp_path):
     extractor = SequenceExtractor(
         [
@@ -231,3 +246,11 @@ class SequenceExtractor:
         payload = self.payloads[self.index]
         self.index += 1
         return MemoryExtraction.model_validate(payload)
+
+
+class StaticLLM:
+    def __init__(self, payload):
+        self.payload = payload
+
+    def generate_json(self, prompt):
+        return self.payload
