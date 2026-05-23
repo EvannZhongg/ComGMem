@@ -119,6 +119,9 @@ def test_default_config_includes_split_config_files():
     assert config.extraction.prompt == "extraction/memory_extraction.md"
     assert config.extraction.pass_node_labels_to_prompt
     assert "entity" in config.node_labels.labels
+    assert {"turn", "event", "fact", "entity", "state", "preference", "task", "instruction", "tool"} <= set(
+        config.node_labels.labels
+    )
     assert config.node_identity.strategy == "canonical_fingerprint"
     assert not config.node_identity.include_node_labels
     assert config.hyperedges.basic_edge_types == ["evidence", "state", "correction"]

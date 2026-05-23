@@ -3,6 +3,12 @@ node_labels:
     description: "System fallback for labels that are not listed below. The model may emit a precise semantic label when a reusable memory object does not fit the configured labels."
     local_graph: {enabled: true, allow_triples: true, allow_attributes: true, allow_roles: true}
     indexing: {lexical: true, vector: true}
+  turn:
+    enabled: true
+    description: "Raw conversation turns or message spans that preserve source text, speaker role, order, and provenance for later evidence tracing."
+    time: {prefer_world_time: true}
+    local_graph: {enabled: true, allow_triples: true, allow_attributes: true, allow_roles: true}
+    indexing: {lexical: true, vector: true, time_index: true}
   entity:
     enabled: true
     description: "Named or referential objects that can be reused across memories, such as people, organizations, places, projects, products, files, tools, and other referents that may appear again."
@@ -15,6 +21,26 @@ node_labels:
     property_index: true
     local_graph: {enabled: true, allow_triples: true, allow_attributes: true, allow_roles: true}
     indexing: {lexical: true, vector: true}
+  state:
+    enabled: true
+    description: "A subject's state over a time range, such as location, role, ownership, relationship, health, availability, progress, or other mutable condition."
+    property_index: true
+    time: {prefer_world_time: true}
+    local_graph: {enabled: true, allow_triples: true, allow_attributes: true, allow_roles: true}
+    indexing: {lexical: true, vector: true, time_index: true}
+  preference:
+    enabled: true
+    description: "Long-term preferences, tendencies, habits, tastes, stable profile details, or recurring choices that should be reused across conversations."
+    property_index: true
+    local_graph: {enabled: true, allow_triples: true, allow_attributes: true, allow_roles: true}
+    indexing: {lexical: true, vector: true}
+  task:
+    enabled: true
+    description: "Plans, goals, tasks, deadlines, TODO items, commitments, progress updates, blockers, outcomes, or next actions."
+    property_index: true
+    time: {prefer_world_time: true}
+    local_graph: {enabled: true, allow_triples: true, allow_attributes: true, allow_roles: true}
+    indexing: {lexical: true, vector: true, time_index: true}
   event:
     enabled: true
     description: "Time-bound interactions, actions, observations, or episodes in a conversation, real-world timeline, tool run, meeting, task step, or observation."
