@@ -4,7 +4,7 @@ from c_hypermem.schema import MemoryNode
 
 
 def compose_result_content(node: MemoryNode, edge_types: list[str]) -> str:
-    label = node.type.title()
+    label = "+".join(node.node_labels) if node.node_labels else "memory"
     source = node.metadata.get("source_session_id")
     date = node.metadata.get("date") or node.time.world.event_time
     suffix_parts = []

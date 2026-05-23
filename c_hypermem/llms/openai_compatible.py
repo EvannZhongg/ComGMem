@@ -3,20 +3,20 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from c_hypermem.config import OpenAICompatibleModelConfig
+from c_hypermem.config import ModelConfig
 from c_hypermem.errors import ConfigError
 
 
 class OpenAICompatibleLLM:
     """Small OpenAI-compatible chat client for explicit extractor implementations."""
 
-    def __init__(self, config: OpenAICompatibleModelConfig) -> None:
+    def __init__(self, config: ModelConfig) -> None:
         self.config = config
         self._client: Any | None = None
 
     @classmethod
-    def from_config(cls, config: OpenAICompatibleModelConfig | dict[str, Any]) -> "OpenAICompatibleLLM":
-        return cls(OpenAICompatibleModelConfig.model_validate(config))
+    def from_config(cls, config: ModelConfig | dict[str, Any]) -> "OpenAICompatibleLLM":
+        return cls(ModelConfig.model_validate(config))
 
     @property
     def client(self) -> Any:

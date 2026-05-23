@@ -14,7 +14,7 @@ class StorageConfig(BaseModel):
     path: str = "runs/c_hypermem/memory.sqlite3"
 
 
-class OpenAICompatibleModelConfig(BaseModel):
+class ModelConfig(BaseModel):
     provider: str = "openai_compatible"
     model: str
     base_url: str | None = None
@@ -33,8 +33,20 @@ class ExtractionConfig(BaseModel):
     output_schema: str = "minimal_memory_candidates"
     forbid_model_ids: bool = True
     forbid_confidence: bool = True
-    pass_node_types_to_prompt: bool = True
-    allow_unknown_node_types: bool = True
+    pass_node_labels_to_prompt: bool = True
+    allow_unknown_node_labels: bool = True
+
+
+class NodeIdentityDisambiguationConfig(BaseModel):
+    enabled: bool = True
+    hint_sources: list[str] = Field(default_factory=lambda: ["aliases", "local_graph", "source_scope", "metadata"])
+
+
+class NodeIdentityConfig(BaseModel):
+    strategy: str = "canonical_fingerprint"
+    include_namespace: bool = True
+    include_node_labels: bool = False
+    disambiguation: NodeIdentityDisambiguationConfig = Field(default_factory=NodeIdentityDisambiguationConfig)
 
 
 class LocalGraphPolicyConfig(BaseModel):
@@ -48,16 +60,16 @@ class IndexingPolicyConfig(BaseModel):
     lexical: bool = True
     vector: bool = True
     alias_index: bool = False
+    time_index: bool = False
 
 
 class TimePolicyConfig(BaseModel):
     prefer_world_time: bool = False
 
 
-class NodeTypeConfig(BaseModel):
+class NodeLabelConfig(BaseModel):
     enabled: bool = True
-    id_strategy: str = "content_hash"
-    stable_key_fields: list[str] = Field(default_factory=list)
+    description: str = ""
     alias_resolution: bool = False
     property_index: bool = False
     local_graph: LocalGraphPolicyConfig = Field(default_factory=LocalGraphPolicyConfig)
@@ -65,16 +77,47 @@ class NodeTypeConfig(BaseModel):
     time: TimePolicyConfig = Field(default_factory=TimePolicyConfig)
 
 
-class NodeTypesConfig(BaseModel):
-    default_policy: NodeTypeConfig = Field(default_factory=NodeTypeConfig)
-    types: dict[str, NodeTypeConfig] = Field(default_factory=dict)
+class NodeLabelsConfig(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    default_policy: NodeLabelConfig = Field(default_factory=NodeLabelConfig)
+
+    def model_post_init(self, __context: Any) -> None:
+        extra = self.__pydantic_extra__ or {}
+        for key, value in list(extra.items()):
+            extra[key] = NodeLabelConfig.model_validate(value)
+
+    @property
+    def labels(self) -> dict[str, NodeLabelConfig]:
+        return dict(self.__pydantic_extra__ or {})
+
+
+class HyperEdgeResolutionConfig(BaseModel):
+    use_member_overlap_as_recall_signal: bool = True
+    require_relation_role_polarity_compatibility_for_merge: bool = True
 
 
 class HyperEdgesConfig(BaseModel):
     enabled: bool = True
     build_from_extraction: bool = True
+    merge_policy: str = "conservative"
     member_policy_default: str = "appendable"
     basic_edge_types: list[str] = Field(default_factory=lambda: ["evidence", "state", "correction"])
+    resolution: HyperEdgeResolutionConfig = Field(default_factory=HyperEdgeResolutionConfig)
+
+
+class EdgeClusterPromptsConfig(BaseModel):
+    edge_merge: str = "maintenance/edge_merge.md"
+    edge_cluster_merge: str = "maintenance/edge_cluster_merge.md"
+    edge_conflict_check: str = "maintenance/edge_conflict_check.md"
+
+
+class EdgeClustersConfig(BaseModel):
+    enabled: bool = True
+    create_from_related_hyperedges: bool = True
+    allow_conflict_clusters: bool = True
+    description_variants_limit: int = 8
+    maintenance_prompts: EdgeClusterPromptsConfig = Field(default_factory=EdgeClusterPromptsConfig)
 
 
 class LocalGraphConfig(BaseModel):
@@ -82,7 +125,24 @@ class LocalGraphConfig(BaseModel):
 
     enabled: bool = True
     schema_name: str = Field(default="uniform", alias="schema")
-    configured_by_node_type: bool = True
+    configured_by_node_labels: bool = True
+
+
+class RelativeDecayConfig(BaseModel):
+    enabled: bool = True
+    unit: str = "turn"
+    decay_lambda: float = 0.03
+    access_boost: float = 0.05
+
+
+class TimeConfig(BaseModel):
+    relative_decay: RelativeDecayConfig = Field(default_factory=RelativeDecayConfig)
+
+
+class IndexConfig(BaseModel):
+    lexical: str = "sqlite_fts"
+    vector: str = "faiss"
+    use_embedding: bool = True
 
 
 class RetrievalConfig(BaseModel):
@@ -91,6 +151,7 @@ class RetrievalConfig(BaseModel):
     edge_top_n: int = 30
     rerank_top_n: int = 12
     use_hyperedge_expansion: bool = True
+    use_edge_cluster_expansion: bool = False
     use_temporal_filter: bool = True
     use_recency_decay: bool = True
     recency_decay_lambda: float = 0.03
@@ -99,13 +160,17 @@ class RetrievalConfig(BaseModel):
 
 class MemoryConfig(BaseModel):
     storage: StorageConfig = Field(default_factory=StorageConfig)
-    llm: OpenAICompatibleModelConfig | None = None
-    embedding: OpenAICompatibleModelConfig | None = None
+    llm: ModelConfig | None = None
+    embedding: ModelConfig | None = None
     ingestion: IngestionConfig = Field(default_factory=IngestionConfig)
     extraction: ExtractionConfig = Field(default_factory=ExtractionConfig)
-    node_types: NodeTypesConfig = Field(default_factory=NodeTypesConfig)
+    node_identity: NodeIdentityConfig = Field(default_factory=NodeIdentityConfig)
+    node_labels: NodeLabelsConfig = Field(default_factory=NodeLabelsConfig)
     hyperedges: HyperEdgesConfig = Field(default_factory=HyperEdgesConfig)
+    edge_clusters: EdgeClustersConfig = Field(default_factory=EdgeClustersConfig)
     local_graph: LocalGraphConfig = Field(default_factory=LocalGraphConfig)
+    time: TimeConfig = Field(default_factory=TimeConfig)
+    index: IndexConfig = Field(default_factory=IndexConfig)
     retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)
     default_top_k: int = 10
     prompt_version: str = "0.1.0"
@@ -120,7 +185,11 @@ class MemoryConfig(BaseModel):
             return config
 
         if isinstance(config, dict):
-            return cls.model_validate(_normalize_external_config(config))
+            raw = dict(config)
+            if "include" in raw:
+                _load_project_dotenv(Path.cwd())
+                raw = _load_includes(raw, Path.cwd())
+            return cls.model_validate(_resolve_env_placeholders(_normalize_external_config(raw)))
 
         path = Path(config)
         if not path.exists():
@@ -133,8 +202,9 @@ class MemoryConfig(BaseModel):
 
         if not isinstance(raw, dict):
             raise ConfigError(f"Config must be a mapping: {path}")
+        _load_project_dotenv(path)
         raw = _load_includes(raw, path.parent)
-        return cls.model_validate(_normalize_external_config(raw))
+        return cls.model_validate(_resolve_env_placeholders(_normalize_external_config(raw)))
 
     def stable_dict(self) -> dict[str, Any]:
         return self.model_dump(mode="json", exclude={"metadata"})
@@ -166,6 +236,43 @@ def _load_includes(raw: dict[str, Any], base_dir: Path) -> dict[str, Any]:
             raise ConfigError(f"Included config must be a mapping: {path}")
         merged = _deep_merge(merged, _load_includes(included, path.parent))
     return _deep_merge(merged, dict(raw))
+
+
+def _resolve_env_placeholders(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {key: _resolve_env_placeholders(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_resolve_env_placeholders(item) for item in value]
+    if isinstance(value, str) and value.startswith("${") and value.endswith("}"):
+        import os
+
+        return os.getenv(value[2:-1], value)
+    return value
+
+
+def _load_project_dotenv(path: Path) -> None:
+    import os
+
+    root = _find_project_root(path)
+    env_path = root / ".env"
+    if not env_path.exists():
+        return
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, raw_value = line.split("=", 1)
+        key = key.strip()
+        value = raw_value.strip().strip('"').strip("'")
+        os.environ.setdefault(key, value)
+
+
+def _find_project_root(path: Path) -> Path:
+    start = path if path.is_dir() else path.parent
+    for candidate in [start, *start.parents]:
+        if (candidate / "pyproject.toml").exists() and (candidate / "c_hypermem").exists():
+            return candidate
+    return start
 
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:

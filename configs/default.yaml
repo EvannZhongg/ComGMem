@@ -1,6 +1,6 @@
 include:
   - models.yaml
-  - node_types.yaml
+  - node_labels.yaml
 
 storage:
   backend: sqlite
@@ -20,22 +20,56 @@ extraction:
   output_schema: minimal_memory_candidates
   forbid_model_ids: true
   forbid_confidence: true
-  pass_node_types_to_prompt: true
-  allow_unknown_node_types: true
+  pass_node_labels_to_prompt: true
+  allow_unknown_node_labels: true
+
+node_identity:
+  strategy: canonical_fingerprint
+  include_namespace: true
+  include_node_labels: false
+  disambiguation:
+    enabled: true
+    hint_sources: [aliases, local_graph, source_scope, metadata]
 
 hyperedges:
   enabled: true
   build_from_extraction: true
+  merge_policy: conservative
   member_policy_default: appendable
   basic_edge_types:
     - evidence
     - state
     - correction
+  resolution:
+    use_member_overlap_as_recall_signal: true
+    require_relation_role_polarity_compatibility_for_merge: true
+
+edge_clusters:
+  enabled: true
+  create_from_related_hyperedges: true
+  allow_conflict_clusters: true
+  description_variants_limit: 8
+  maintenance_prompts:
+    edge_merge: maintenance/edge_merge.md
+    edge_cluster_merge: maintenance/edge_cluster_merge.md
+    edge_conflict_check: maintenance/edge_conflict_check.md
 
 local_graph:
   enabled: true
   schema: uniform
-  configured_by_node_type: true
+  configured_by_node_labels: true
+
+time:
+  relative_decay:
+    enabled: true
+    unit: turn
+    decay_lambda: 0.03
+    access_boost: 0.05
+
+index:
+  lexical: sqlite_fts
+  vector: faiss
+  use_embedding: true
 
 retrieval:
   lexical_top_n: 30
@@ -43,6 +77,7 @@ retrieval:
   edge_top_n: 30
   rerank_top_n: 12
   use_hyperedge_expansion: true
+  use_edge_cluster_expansion: false
   use_temporal_filter: true
   use_recency_decay: true
   recency_decay_lambda: 0.03

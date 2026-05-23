@@ -5,7 +5,8 @@ from typing import Any
 
 from c_hypermem.config import MemoryConfig
 from c_hypermem.pipeline import IngestionPipeline
-from c_hypermem.pipeline.extraction import MemoryExtractor
+from c_hypermem.pipeline.edge_cluster_builder import EdgeClusterBuilder
+from c_hypermem.pipeline.extraction import LLMMemoryExtractor, MemoryExtractor
 from c_hypermem.pipeline.hyperedge_builder import HyperEdgeBuilder
 from c_hypermem.retrieval import Retriever
 from c_hypermem.schema import AgentInteraction, MemoryImportBatch, Message
@@ -20,10 +21,19 @@ class Memory:
         *,
         extractor: MemoryExtractor | None = None,
         hyperedge_builder: HyperEdgeBuilder | None = None,
+        edge_cluster_builder: EdgeClusterBuilder | None = None,
     ) -> None:
         self.config = config
         self.store = SQLiteStore(Path(config.storage.path))
-        self.ingestion = IngestionPipeline(config, extractor=extractor, hyperedge_builder=hyperedge_builder)
+        if extractor is None and config.llm is not None:
+            extractor = LLMMemoryExtractor(config)
+        self.ingestion = IngestionPipeline(
+            config,
+            self.store,
+            extractor=extractor,
+            hyperedge_builder=hyperedge_builder,
+            edge_cluster_builder=edge_cluster_builder,
+        )
         self.retriever = Retriever(self.store, config.retrieval)
         self._turn_counters: dict[str, int] = {}
 
@@ -34,8 +44,14 @@ class Memory:
         *,
         extractor: MemoryExtractor | None = None,
         hyperedge_builder: HyperEdgeBuilder | None = None,
+        edge_cluster_builder: EdgeClusterBuilder | None = None,
     ) -> "Memory":
-        return cls(MemoryConfig.load(config), extractor=extractor, hyperedge_builder=hyperedge_builder)
+        return cls(
+            MemoryConfig.load(config),
+            extractor=extractor,
+            hyperedge_builder=hyperedge_builder,
+            edge_cluster_builder=edge_cluster_builder,
+        )
 
     def reset(self, namespace: str = "default") -> None:
         self.store.reset_namespace(namespace)
@@ -71,8 +87,7 @@ class Memory:
             namespace=namespace,
             current_turn=current_turn,
         )
-        self.store.upsert_nodes(output.nodes)
-        self.store.upsert_edges(output.edges)
+        self._persist_output(output)
 
     def add(
         self,
@@ -84,8 +99,7 @@ class Memory:
         batch = MemoryImportBatch(messages=message_objs, metadata=metadata or {})
         current_turn = self._next_turn(namespace, increment=max(1, len(message_objs)))
         output = self.ingestion.ingest_batch(batch, namespace=namespace, current_turn=current_turn)
-        self.store.upsert_nodes(output.nodes)
-        self.store.upsert_edges(output.edges)
+        self._persist_output(output)
 
     def search(
         self,
@@ -119,6 +133,14 @@ class Memory:
         nodes = self.store.get_nodes(namespace, node_ids)
         touched = [touch_node_access(node, current_turn) for node in nodes]
         self.store.upsert_nodes(touched)
+
+    def _persist_output(self, output: Any) -> None:
+        self.store.upsert_nodes(output.nodes)
+        self.store.upsert_edges(output.edges)
+        self.store.upsert_edge_clusters(output.edge_clusters)
+        self.store.upsert_edge_cluster_members(output.edge_cluster_members)
+        self.store.upsert_entity_aliases(output.entity_aliases)
+        self.store.upsert_fact_properties(output.fact_properties)
 
 
 def _message_or_none(value: str | dict[str, Any] | None, *, default_role: str) -> dict[str, Any] | None:

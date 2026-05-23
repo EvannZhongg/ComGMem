@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from c_hypermem.config import OpenAICompatibleModelConfig
+from c_hypermem.config import ModelConfig
 from c_hypermem.errors import ConfigError
 
 
@@ -13,13 +13,13 @@ class EmbeddingModelClient:
     keeping the module and class name provider-neutral for future model backends.
     """
 
-    def __init__(self, config: OpenAICompatibleModelConfig) -> None:
+    def __init__(self, config: ModelConfig) -> None:
         self.config = config
         self._client: Any | None = None
 
     @classmethod
-    def from_config(cls, config: OpenAICompatibleModelConfig | dict[str, Any]) -> "EmbeddingModelClient":
-        return cls(OpenAICompatibleModelConfig.model_validate(config))
+    def from_config(cls, config: ModelConfig | dict[str, Any]) -> "EmbeddingModelClient":
+        return cls(ModelConfig.model_validate(config))
 
     @property
     def client(self) -> Any:
@@ -34,4 +34,3 @@ class EmbeddingModelClient:
     def embed(self, texts: list[str]) -> list[list[float]]:
         response = self.client.embeddings.create(model=self.config.model, input=texts)
         return [item.embedding for item in response.data]
-

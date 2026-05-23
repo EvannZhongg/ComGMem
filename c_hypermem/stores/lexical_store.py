@@ -52,4 +52,16 @@ def _node_text(node: MemoryNode) -> str:
     )
     aliases = " ".join(str(alias) for alias in node.metadata.get("aliases", []))
     attributes = " ".join(str(value) for value in node.attributes.values())
-    return " ".join([node.content, node.summary, aliases, attributes, triple_text])
+    labels = " ".join(node.node_labels)
+    return " ".join(
+        [
+            node.canonical_text,
+            node.normalized_text,
+            node.content,
+            node.summary,
+            labels,
+            aliases,
+            attributes,
+            triple_text,
+        ]
+    )

@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
-NodeType = str
+NodeLabel = str
 MemoryStatus = Literal["active", "retired", "invalidated", "uncertain"]
+ConflictState = Literal["none", "contains_conflict", "needs_review"]
 MemberPolicy = Literal["immutable", "appendable", "versioned"]
+Polarity = Literal["positive", "negative", "neutral", "unknown"]
 
 
 class ValidTime(BaseModel):
@@ -44,11 +46,15 @@ class TimeBundle(BaseModel):
 
 
 class LocalTriple(BaseModel):
-    id: str | None = None
+    triple_id: str | None = None
     subject: str
     predicate: str
     object: str
     status: MemoryStatus = "active"
+    scope_edge_id: str | None = None
+    scope_cluster_id: str | None = None
+    role_in_edge: str | None = None
+    edge_relation: str | None = None
     superseded_by: str | None = None
     invalidated_by: str | None = None
     qualifiers: dict[str, Any] = Field(default_factory=dict)
@@ -60,10 +66,63 @@ class LocalNodeGraph(BaseModel):
     roles: dict[str, str] = Field(default_factory=dict)
 
 
+class ExtractedSource(BaseModel):
+    text: str = ""
+    ref: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ExtractedEntity(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    name: str
+    entity_type: str | None = Field(default=None, alias="type")
+    labels: list[str] = Field(default_factory=list)
+    aliases: list[str] = Field(default_factory=list)
+    source_ref: str | None = None
+    attributes: dict[str, Any] = Field(default_factory=dict)
+
+
+class EventParticipant(BaseModel):
+    name: str
+    role: str | None = None
+
+
+class ExtractedEvent(BaseModel):
+    summary: str
+    time: str | None = None
+    participants: list[EventParticipant] = Field(default_factory=list)
+    labels: list[str] = Field(default_factory=list)
+    source_ref: str | None = None
+    attributes: dict[str, Any] = Field(default_factory=dict)
+
+
+class ExtractedAssertion(BaseModel):
+    subject: str
+    predicate: str
+    object: str
+    source_ref: str | None = None
+    polarity: Polarity = "positive"
+    time: str | None = None
+    labels: list[str] = Field(default_factory=list)
+    attributes: dict[str, Any] = Field(default_factory=dict)
+
+
+class MemoryExtraction(BaseModel):
+    entities: list[ExtractedEntity] = Field(default_factory=list)
+    events: list[ExtractedEvent] = Field(default_factory=list)
+    assertions: list[ExtractedAssertion] = Field(default_factory=list)
+    sources: list[ExtractedSource] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class MemoryNode(BaseModel):
-    id: str
+    node_id: str
     namespace: str
-    type: NodeType
+    canonical_text: str
+    normalized_text: str
+    fingerprint: str
+    node_labels: list[NodeLabel] = Field(default_factory=list)
     status: MemoryStatus = "active"
     superseded_by: str | None = None
     invalidated_by: str | None = None
@@ -75,15 +134,17 @@ class MemoryNode(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
     time: TimeBundle = Field(default_factory=TimeBundle)
     local_graph: LocalNodeGraph = Field(default_factory=LocalNodeGraph)
-    dedupe_key: str | None = None
 
 
 class HyperEdge(BaseModel):
-    id: str
+    edge_id: str
     namespace: str
+    edge_fingerprint: str
     edge_type: str
     relation: str
-    edge_key: str
+    description: str = ""
+    polarity: Polarity = "unknown"
+    status: MemoryStatus = "active"
     member_policy: MemberPolicy = "immutable"
     member_signature: str = ""
     member_version: int = 1
@@ -94,11 +155,38 @@ class HyperEdge(BaseModel):
     time: TimeBundle = Field(default_factory=TimeBundle)
 
 
+class EdgeDescriptionVariant(BaseModel):
+    text: str
+    source_edge_id: str | None = None
+
+
+class EdgeCluster(BaseModel):
+    cluster_id: str
+    namespace: str
+    cluster_fingerprint: str
+    canonical_description: str
+    cluster_labels: list[str] = Field(default_factory=list)
+    aliases: list[str] = Field(default_factory=list)
+    conflict_state: ConflictState = "none"
+    description_variants: list[EdgeDescriptionVariant] = Field(default_factory=list)
+    status: MemoryStatus = "active"
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class EdgeClusterMember(BaseModel):
+    namespace: str
+    cluster_id: str
+    edge_id: str
+    relation_to_cluster: str = "supports"
+    status: MemoryStatus = "active"
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class EntityAliasIndexEntry(BaseModel):
     namespace: str
     normalized_alias: str
     entity_type: str | None = None
-    entity_id: str
+    node_id: str
     source_count: int = 1
     updated_at: str | None = None
 
@@ -106,9 +194,9 @@ class EntityAliasIndexEntry(BaseModel):
 class FactPropertyIndexEntry(BaseModel):
     namespace: str
     property_key: str
-    entity_id: str | None = None
+    subject_node_id: str | None = None
     predicate: str
-    fact_id: str
+    fact_node_id: str
     status: MemoryStatus = "active"
     updated_at: str | None = None
 
@@ -170,6 +258,10 @@ class MemoryImportBatch(BaseModel):
 class IngestionOutput(BaseModel):
     nodes: list[MemoryNode] = Field(default_factory=list)
     edges: list[HyperEdge] = Field(default_factory=list)
+    edge_clusters: list[EdgeCluster] = Field(default_factory=list)
+    edge_cluster_members: list[EdgeClusterMember] = Field(default_factory=list)
+    entity_aliases: list[EntityAliasIndexEntry] = Field(default_factory=list)
+    fact_properties: list[FactPropertyIndexEntry] = Field(default_factory=list)
 
 
 class SearchResult(BaseModel):
@@ -177,4 +269,3 @@ class SearchResult(BaseModel):
     content: str
     score: float
     metadata: dict[str, Any] = Field(default_factory=dict)
-

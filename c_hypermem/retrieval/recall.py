@@ -41,7 +41,7 @@ class Retriever:
         candidates: dict[str, Candidate] = {}
 
         for node, lexical_score, parts in scored:
-            candidate = candidates.setdefault(node.id, Candidate(node=node, score=0.0))
+            candidate = candidates.setdefault(node.node_id, Candidate(node=node, score=0.0))
             candidate.score += lexical_score
             candidate.score_parts.update(parts)
             self._apply_structural_scores(candidate, analysis, current_turn)
@@ -60,7 +60,7 @@ class Retriever:
         for edge in edges:
             for seed_id in seed_ids:
                 if seed_id in edge.node_ids and seed_id in candidates:
-                    candidates[seed_id].edge_ids.add(edge.id)
+                    candidates[seed_id].edge_ids.add(edge.edge_id)
                     candidates[seed_id].edge_types.add(edge.edge_type)
                     candidates[seed_id].score += 0.15
                     candidates[seed_id].score_parts["edge_coherence"] = (
@@ -74,10 +74,10 @@ class Retriever:
 
         expanded_nodes = self.store.get_nodes(namespace, list(dict.fromkeys(expanded_ids)))
         for node in expanded_nodes:
-            candidate = candidates.setdefault(node.id, Candidate(node=node, score=0.0))
-            incident = [edge for edge in edges if node.id in edge.node_ids]
+            candidate = candidates.setdefault(node.node_id, Candidate(node=node, score=0.0))
+            incident = [edge for edge in edges if node.node_id in edge.node_ids]
             for edge in incident:
-                candidate.edge_ids.add(edge.id)
+                candidate.edge_ids.add(edge.edge_id)
                 candidate.edge_types.add(edge.edge_type)
             expansion_score = 0.35 + min(len(candidate.edge_types), 3) * 0.1
             candidate.score += expansion_score
@@ -90,13 +90,13 @@ class Retriever:
         current_turn: int | None,
     ) -> None:
         node = candidate.node
-        if analysis.asks_preference and node.type == "preference":
+        if analysis.asks_preference and _has_label(node, "preference"):
             candidate.score += 0.8
             candidate.score_parts["preference_match"] = 0.8
-        if analysis.asks_task and node.type == "task":
+        if analysis.asks_task and _has_label(node, "task"):
             candidate.score += 0.8
             candidate.score_parts["task_match"] = 0.8
-        if node.type == "entity" and any(hint.lower() == node.content.lower() for hint in analysis.entity_hints):
+        if _has_label(node, "entity") and any(hint.lower() == node.content.lower() for hint in analysis.entity_hints):
             candidate.score += 0.5
             candidate.score_parts["entity_match"] = 0.5
         if analysis.time_hints:
@@ -125,7 +125,7 @@ class Retriever:
         analysis: QueryAnalysis,
     ) -> list[Candidate]:
         answer_types = {"fact", "preference", "task", "state", "event"}
-        answer_candidates = [candidate for candidate in candidates if candidate.node.type in answer_types]
+        answer_candidates = [candidate for candidate in candidates if answer_types.intersection(candidate.node.node_labels)]
         if answer_candidates:
             return answer_candidates
         return list(candidates)
@@ -133,8 +133,8 @@ class Retriever:
     def _to_result(self, candidate: Candidate) -> SearchResult:
         node = candidate.node
         metadata = {
-            "node_type": node.type,
-            "node_id": node.id,
+            "node_labels": node.node_labels,
+            "node_id": node.node_id,
             "source_session_id": node.metadata.get("source_session_id"),
             "source_event_id": node.metadata.get("source_event_id"),
             "source_turn_ids": node.metadata.get("source_turn_ids", []),
@@ -147,7 +147,7 @@ class Retriever:
         if node.local_graph.triples:
             metadata["triples"] = [triple.model_dump(mode="json") for triple in node.local_graph.triples[:5]]
         return SearchResult(
-            id=node.id,
+            id=node.node_id,
             content=compose_result_content(node, sorted(candidate.edge_types)),
             score=float(candidate.score),
             metadata=metadata,
@@ -164,3 +164,7 @@ def _expandable_role(edge: HyperEdge, node_id: str) -> bool:
         "topic_evidence",
         "preference_evidence",
     }
+
+
+def _has_label(node: MemoryNode, label: str) -> bool:
+    return label in node.node_labels

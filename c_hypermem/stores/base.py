@@ -2,7 +2,14 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from c_hypermem.schema import EntityAliasIndexEntry, FactPropertyIndexEntry, HyperEdge, MemoryNode
+from c_hypermem.schema import (
+    EdgeCluster,
+    EdgeClusterMember,
+    EntityAliasIndexEntry,
+    FactPropertyIndexEntry,
+    HyperEdge,
+    MemoryNode,
+)
 
 
 class MemoryStore(Protocol):
@@ -12,13 +19,23 @@ class MemoryStore(Protocol):
 
     def upsert_edges(self, edges: list[HyperEdge]) -> None: ...
 
+    def upsert_edge_clusters(self, clusters: list[EdgeCluster]) -> None: ...
+
+    def upsert_edge_cluster_members(self, members: list[EdgeClusterMember]) -> None: ...
+
     def list_nodes(self, namespace: str) -> list[MemoryNode]: ...
 
     def list_edges(self, namespace: str) -> list[HyperEdge]: ...
 
+    def list_edge_clusters(self, namespace: str) -> list[EdgeCluster]: ...
+
+    def list_edge_cluster_members(self, namespace: str, cluster_ids: list[str] | None = None) -> list[EdgeClusterMember]: ...
+
     def get_nodes(self, namespace: str, node_ids: list[str]) -> list[MemoryNode]: ...
 
     def get_incident_edges(self, namespace: str, node_ids: list[str]) -> list[HyperEdge]: ...
+
+    def get_edge_clusters_for_edges(self, namespace: str, edge_ids: list[str]) -> list[EdgeCluster]: ...
 
     def upsert_entity_aliases(self, aliases: list[EntityAliasIndexEntry]) -> None: ...
 

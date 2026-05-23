@@ -19,6 +19,9 @@ class PromptRegistry:
         "retrieval.query_analysis": "retrieval/query_analysis.md",
         "maintenance.fact_merge": "maintenance/fact_merge.md",
         "maintenance.contradiction_check": "maintenance/contradiction_check.md",
+        "maintenance.edge_merge": "maintenance/edge_merge.md",
+        "maintenance.edge_cluster_merge": "maintenance/edge_cluster_merge.md",
+        "maintenance.edge_conflict_check": "maintenance/edge_conflict_check.md",
     }
 
     def __init__(self, package: str = "c_hypermem.prompts") -> None:
