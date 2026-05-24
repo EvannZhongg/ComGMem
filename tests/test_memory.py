@@ -613,7 +613,7 @@ def test_conflicting_fact_retires_old_fact_and_adds_correction_edge(tmp_path):
 
 def test_retired_fact_local_graph_vector_is_removed_from_vector_store(tmp_path):
     embedding_client = RecordingEmbeddingClient()
-    vector_store = RecordingVectorStore()
+    vector_store = RecordingVectorStore(name="primary")
     extractor = SequenceExtractor(
         [
             {
@@ -655,6 +655,7 @@ def test_retired_fact_local_graph_vector_is_removed_from_vector_store(tmp_path):
 
     assert retired
     assert make_vector_point_id(namespace, "triple", retired[0].node_id) in vector_store.deleted_ids
+    assert ("primary", [make_vector_point_id(namespace, "triple", retired[0].node_id)]) in vector_store.delete_calls
     assert any("Related facts:\n- Toby is_a dog" in record.text for record in vector_store.records)
     assert any("Related facts:\n- Toby is_a cat" in record.text for record in vector_store.records)
 
@@ -977,9 +978,11 @@ class RecordingEmbeddingClient:
 
 
 class RecordingVectorStore:
-    def __init__(self):
+    def __init__(self, name="recording"):
+        self.name = name
         self.records = []
         self.deleted_ids = []
+        self.delete_calls = []
         self.deleted_namespaces = []
         self.closed = False
 
@@ -987,6 +990,8 @@ class RecordingVectorStore:
         self.records.extend(records)
 
     def delete(self, ids):
+        ids = list(ids)
+        self.delete_calls.append((self.name, ids))
         self.deleted_ids.extend(ids)
 
     def delete_namespace(self, namespace):

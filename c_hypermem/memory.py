@@ -227,24 +227,26 @@ class Memory:
     def _persist_output(self, output: Any) -> None:
         self.store.upsert_nodes(output.nodes)
         self._delete_retired_vectors(output.retired_nodes)
-        self._index_nodes(output.nodes)
-        self._index_node_local_graphs(output.nodes)
         self.store.upsert_edges(output.edges)
         self.store.upsert_edge_clusters(output.edge_clusters)
-        self._index_edge_clusters(output.edge_clusters)
+        self._index_nodes_and_clusters(output.nodes, output.edge_clusters)
         self.store.upsert_edge_cluster_members(output.edge_cluster_members)
         self.store.upsert_entity_aliases(output.entity_aliases)
         self.store.upsert_fact_properties(output.fact_properties)
 
     def _delete_retired_vectors(self, nodes: list[Any]) -> None:
-        if not self.vector_stores:
+        if not nodes:
             return
-        ids_by_type: dict[str, list[str]] = {
-            "triple": [
+        local_graph_ids = list(
+            dict.fromkeys(
                 make_vector_point_id(node.namespace, "triple", node.node_id)
                 for node in nodes
                 if node.local_graph.triples
-            ],
+            )
+        )
+        if self.vector_store is not None and local_graph_ids:
+            self.vector_store.delete(local_graph_ids)
+        ids_by_type: dict[str, list[str]] = {
             "node_content": [
                 make_vector_point_id(node.namespace, "node_content", node.node_id)
                 for node in nodes
@@ -260,7 +262,7 @@ class Memory:
             if store is not None and unique_ids:
                 store.delete(unique_ids)
 
-    def _index_nodes(self, nodes: list[Any]) -> None:
+    def _index_nodes_and_clusters(self, nodes: list[Any], clusters: list[Any]) -> None:
         self._index_items(
             "node_content",
             [
@@ -277,16 +279,14 @@ class Memory:
                 if item.payload.get("node_status") == "active"
             ],
         )
-
-    def _index_node_local_graphs(self, nodes: list[Any]) -> None:
-        items = [
-            item
-            for item in collect_node_local_graph_index_items(nodes)
-            if item.payload.get("node_status") == "active"
-        ]
-        self._index_items("triple", items)
-
-    def _index_edge_clusters(self, clusters: list[Any]) -> None:
+        self._index_items(
+            "triple",
+            [
+                item
+                for item in collect_node_local_graph_index_items(nodes)
+                if item.payload.get("node_status") == "active"
+            ],
+        )
         self._index_items(
             "edge_cluster_canonical",
             [

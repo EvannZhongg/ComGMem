@@ -135,7 +135,7 @@ edge_clusters:
 - `edge_cluster_canonical` 向量：索引 `EdgeCluster.canonical_description`，payload 中保留 `cluster_id/cluster_labels/conflict_state` 等信息。
 - `edge_cluster_variant` 向量：索引 `EdgeCluster.description_variants` 中的各个描述变体，payload 中保留 `cluster_id/variant_index/source_edge_id` 等信息。`BasicEdgeClusterBuilder` 复用已有 cluster 时会追加新的 description variant，并重新持久化 cluster。
 - `turn_dialogue` 向量：只索引同一个 `turn_id` 下 role 为 `user` 和 `assistant` 的消息，按轮次拼接为完整对话日志，且payload 中必须带 `turn_id` 和 `turn_index`。后续检索命中该向量时，应拿 `turn_id` 回 SQLite `turns` 表提取完整对话，而不是依赖向量库中的文本作为权威上下文。
-- LLM 维护流程退役旧 fact 时，会删除该旧 fact 对应的 node-local-graph、node_content 和 node_summary 向量点，避免退役事实被向量召回。
+- LLM 维护流程退役旧 fact 时，会删除该旧 fact 对应的 node-local-graph、node_content 和 node_summary 向量点，避免退役事实被向量召回。其中 node-local-graph 向量删除显式调用 `self.vector_store.delete(...)`，也就是主 `triple` collection 对应的 vector store。
 
 ## 7. 检索现状
 
@@ -263,7 +263,8 @@ edge_clusters:
 - SQLite schema 不再创建 `ingestion_cache`。
 - SQLite `turns` 表保存交互历史，并为节点/边写入 `source_turn_ids`。
 - 默认向量后端配置为 Qdrant。
-- node-local-graph 向量索引按 node 聚合写入：一个 node 的 `content/attributes/triples` 拼成一段文本，只写入 1 个向量点，payload 中保留该 node 下所有 `triple_ids`。
+- node-local-graph 向量索引按 node 聚合写入：一个 node 的 `content/triples` 拼成一段文本，只写入 1 个向量点，payload 中保留该 node 下所有 `triple_ids`。当前不再对散碎 triple 逐条 embedding。
+- 写入侧统一通过 `Memory._index_nodes_and_clusters(...)` 为 node-local-graph、node content、node summary、EdgeCluster canonical description 和 EdgeCluster variants 建索引；旧的 `_index_triples` 路径已废弃。
 - `MemoryNode.content` 和 `MemoryNode.summary` 分别写入独立向量 collection。
 - `EdgeCluster.canonical_description` 和 `description_variants` 分别写入独立向量 collection。
 - 复用已有 EdgeCluster 时会追加 description variant，并参与后续向量写入。
