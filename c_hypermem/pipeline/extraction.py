@@ -54,27 +54,15 @@ class LLMMemoryExtractor:
     def _render_prompt(self, window: ExtractionWindow, context: ExtractionContext) -> str:
         prompt_id = _prompt_id_from_path(self.config.extraction.prompt)
         prompt = self.prompt_registry.load(prompt_id)
-        prompt_text = _render_prompt_template(prompt.text, self.config)
-        parts = [
-            prompt_text,
-            "",
-            "# Interaction Metadata",
-            _compact_json(context.metadata),
-            "",
-            "# Context: Recent History",
-            _render_messages(window.context, ref_prefix="context") or "None",
-            "",
-            "# Target to Extract",
-            _render_messages(window.target, ref_prefix="target"),
-            "",
-            "# Strict JSON Shape",
-            (
-                'Return one JSON object with keys "entities", "events", "assertions", and "sources". '
-                "Use assertions as the single carrier for facts, attributes, and triples. "
-                "Use Context only to resolve references and extract memories only from Target. "
-                "Do not output node_id, edge_id, entity_id, triple_id, confidence, salience, weight, or graph structure."
-            ),
-        ]
+        prompt_text = _render_prompt_template(
+            prompt.text,
+            self.config,
+            interaction_metadata=_compact_json(context.metadata),
+            recent_context=_render_messages(window.context, ref_prefix="context") or "None",
+            target_messages=_render_messages(window.target, ref_prefix="target"),
+            strict_json_shape=_strict_json_shape(),
+        )
+        parts = [prompt_text]
         if "{{NODE_LABELS}}" not in prompt.text and self.config.extraction.pass_node_labels_to_prompt:
             parts.insert(1, "\n# Enabled Node Label Preferences\n" + _render_node_labels(self.config))
         return "\n".join(parts)
@@ -148,9 +136,36 @@ def _render_node_labels(config: MemoryConfig) -> str:
     return "\n".join(rows) or "No configured labels."
 
 
-def _render_prompt_template(template: str, config: MemoryConfig) -> str:
+def _render_prompt_template(
+    template: str,
+    config: MemoryConfig,
+    *,
+    interaction_metadata: str = "",
+    recent_context: str = "",
+    target_messages: str = "",
+    strict_json_shape: str = "",
+) -> str:
     node_labels = _render_node_labels(config) if config.extraction.pass_node_labels_to_prompt else "Not provided."
-    return template.replace("{{NODE_LABELS}}", node_labels)
+    replacements = {
+        "{{NODE_LABELS}}": node_labels,
+        "{{INTERACTION_METADATA}}": interaction_metadata,
+        "{{RECENT_CONTEXT}}": recent_context,
+        "{{TARGET_MESSAGES}}": target_messages,
+        "{{STRICT_JSON_SHAPE}}": strict_json_shape,
+    }
+    rendered = template
+    for placeholder, value in replacements.items():
+        rendered = rendered.replace(placeholder, value)
+    return rendered
+
+
+def _strict_json_shape() -> str:
+    return (
+        'Return one JSON object with keys "entities", "events", "assertions", and "sources". '
+        "Use assertions as the single carrier for facts, attributes, and triples. "
+        "Use Context only to resolve references and extract memories only from Target. "
+        "Do not output node_id, edge_id, entity_id, triple_id, confidence, salience, weight, or graph structure."
+    )
 
 
 def _render_messages(messages: list[Message], *, ref_prefix: str = "message") -> str:

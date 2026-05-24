@@ -290,12 +290,17 @@ def test_extraction_prompt_injects_node_label_config():
     )
 
     assert "{{NODE_LABELS}}" not in prompt
+    assert "{{INTERACTION_METADATA}}" not in prompt
+    assert "{{RECENT_CONTEXT}}" not in prompt
+    assert "{{TARGET_MESSAGES}}" not in prompt
+    assert "{{STRICT_JSON_SHAPE}}" not in prompt
     assert "- entity:" in prompt
     assert "- instruction:" in prompt
     assert "Other precise labels are allowed" in prompt
     assert "node_id" in prompt
-    assert "# Context: Recent History" in prompt
-    assert "# Target to Extract" in prompt
+    assert "## Interaction Metadata" in prompt
+    assert "## Context: Recent History" in prompt
+    assert "## Target to Extract" in prompt
     assert "[context:0]" in prompt
     assert "[target:0]" in prompt
     assert "extract memories only from Target" in prompt

@@ -129,5 +129,20 @@ message.
 
 # Dynamic Input
 
-The interaction metadata, recent context, and target span will be supplied below
-by the caller.
+The caller fills these sections before sending the prompt to the model.
+
+## Interaction Metadata
+
+{{INTERACTION_METADATA}}
+
+## Context: Recent History
+
+{{RECENT_CONTEXT}}
+
+## Target to Extract
+
+{{TARGET_MESSAGES}}
+
+# Strict JSON Shape
+
+{{STRICT_JSON_SHAPE}}
