@@ -19,6 +19,7 @@ from c_hypermem.stores.vector_store import (
     VectorRecord,
     VectorStore,
     collect_triple_index_items,
+    make_vector_point_id,
 )
 from c_hypermem.utils.time import touch_node_access
 
@@ -191,12 +192,26 @@ class Memory:
 
     def _persist_output(self, output: Any) -> None:
         self.store.upsert_nodes(output.nodes)
+        self._delete_retired_triples(output.retired_nodes)
         self._index_triples(output.nodes)
         self.store.upsert_edges(output.edges)
         self.store.upsert_edge_clusters(output.edge_clusters)
         self.store.upsert_edge_cluster_members(output.edge_cluster_members)
         self.store.upsert_entity_aliases(output.entity_aliases)
         self.store.upsert_fact_properties(output.fact_properties)
+
+    def _delete_retired_triples(self, nodes: list[Any]) -> None:
+        if self.vector_store is None:
+            return
+        ids = [
+            make_vector_point_id(node.namespace, triple.triple_id)
+            for node in nodes
+            for triple in node.local_graph.triples
+            if triple.triple_id is not None
+        ]
+        ids = list(dict.fromkeys(ids))
+        if ids:
+            self.vector_store.delete(ids)
 
     def _index_triples(self, nodes: list[Any]) -> None:
         if self.vector_store is None or self.embedding_client is None:

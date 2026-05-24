@@ -257,6 +257,7 @@ class MemoryImportBatch(BaseModel):
 
 class IngestionOutput(BaseModel):
     nodes: list[MemoryNode] = Field(default_factory=list)
+    retired_nodes: list[MemoryNode] = Field(default_factory=list)
     edges: list[HyperEdge] = Field(default_factory=list)
     edge_clusters: list[EdgeCluster] = Field(default_factory=list)
     edge_cluster_members: list[EdgeClusterMember] = Field(default_factory=list)

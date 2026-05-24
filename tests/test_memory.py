@@ -19,7 +19,7 @@ from c_hypermem.pipeline.node_builder import NodeBuilder, collect_entities
 from c_hypermem.pipeline.extraction import ExtractionContext, ExtractionWindow, LLMMemoryExtractor, _render_node_labels
 from c_hypermem.retrieval.expansion import EdgeExpansion
 from c_hypermem.schema import ExtractedAssertion, ExtractedEntity, MemoryExtraction, Message
-from c_hypermem.stores.vector_store import collect_triple_index_items, triple_embedding_text
+from c_hypermem.stores.vector_store import collect_triple_index_items, make_vector_point_id, triple_embedding_text
 from c_hypermem.utils.prompts import PromptRegistry
 
 
@@ -441,6 +441,56 @@ def test_conflicting_fact_retires_old_fact_and_adds_correction_edge(tmp_path):
     assert stats["fact_properties"] == 2
 
 
+def test_retired_fact_triples_are_removed_from_vector_store(tmp_path):
+    embedding_client = RecordingEmbeddingClient()
+    vector_store = RecordingVectorStore()
+    extractor = SequenceExtractor(
+        [
+            {
+                "entities": [{"name": "Toby", "type": "pet"}],
+                "events": [{"summary": "The user described Toby.", "participants": [{"name": "Toby"}]}],
+                "assertions": [{"subject": "Toby", "predicate": "is_a", "object": "dog"}],
+            },
+            {
+                "entities": [{"name": "Toby", "type": "pet"}],
+                "events": [{"summary": "The user corrected Toby.", "participants": [{"name": "Toby"}]}],
+                "assertions": [{"subject": "Toby", "predicate": "is_a", "object": "cat"}],
+            },
+        ]
+    )
+    memory = Memory.from_config(
+        {"storage": {"path": str(tmp_path / "memory.sqlite3")}},
+        extractor=extractor,
+        maintenance_llm=MaintenanceLLM(
+            [
+                {
+                    "conflict_state": "contradiction",
+                    "affected_existing_refs": ["existing:0"],
+                    "recommended_old_status": "retired",
+                    "valid_time_update": {},
+                    "rationale": "The new species replaces the old species for the same pet.",
+                }
+            ]
+        ),
+        embedding_client=embedding_client,
+        vector_store=vector_store,
+    )
+    namespace = "retired_vector_ns"
+    memory.reset(namespace)
+
+    memory.add_memory("Toby is a dog.", namespace=namespace)
+    memory.add_memory("Toby is my cat.", namespace=namespace)
+    retired = [node for node in memory.store.list_nodes(namespace) if node.status == "retired"]
+    memory.close()
+
+    assert retired
+    old_triple_id = retired[0].local_graph.triples[0].triple_id
+    assert old_triple_id is not None
+    assert make_vector_point_id(namespace, old_triple_id) in vector_store.deleted_ids
+    assert any(record.text == "Toby is_a dog" for record in vector_store.records)
+    assert any(record.text == "Toby is_a cat" for record in vector_store.records)
+
+
 def test_edge_cluster_builder_reuses_existing_property_cluster(tmp_path):
     extractor = SequenceExtractor(
         [
@@ -708,11 +758,15 @@ class RecordingEmbeddingClient:
 class RecordingVectorStore:
     def __init__(self):
         self.records = []
+        self.deleted_ids = []
         self.deleted_namespaces = []
         self.closed = False
 
     def upsert(self, records):
         self.records.extend(records)
+
+    def delete(self, ids):
+        self.deleted_ids.extend(ids)
 
     def delete_namespace(self, namespace):
         self.deleted_namespaces.append(namespace)

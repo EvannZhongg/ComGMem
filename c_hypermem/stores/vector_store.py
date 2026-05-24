@@ -29,6 +29,8 @@ class VectorStore(Protocol):
 
     def upsert(self, records: Sequence[VectorRecord]) -> None: ...
 
+    def delete(self, ids: Sequence[str]) -> None: ...
+
     def delete_namespace(self, namespace: str) -> None: ...
 
     def close(self) -> None: ...
@@ -103,6 +105,24 @@ class QdrantVectorStore:
             )
         except Exception as exc:
             raise StoreError(f"Failed to delete Qdrant vectors for namespace {namespace!r}.") from exc
+
+    def delete(self, ids: Sequence[str]) -> None:
+        if not ids:
+            return
+        if self._client is None and not self.path.exists():
+            return
+        if not self._collection_exists():
+            return
+        try:
+            from qdrant_client.http.models import PointIdsList
+
+            self.client.delete(
+                collection_name=self.collection_name,
+                points_selector=PointIdsList(points=list(dict.fromkeys(ids))),
+                wait=True,
+            )
+        except Exception as exc:
+            raise StoreError(f"Failed to delete {len(ids)} Qdrant vector record(s).") from exc
 
     def close(self) -> None:
         if self._client is None:

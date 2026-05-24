@@ -50,6 +50,7 @@ class GraphAssembler:
 
     def assemble(self, extraction: MemoryExtraction, context: AssemblyContext) -> tuple[
         list[MemoryNode],
+        list[MemoryNode],
         list[HyperEdge],
         list[EdgeCluster],
         list[EdgeClusterMember],
@@ -60,6 +61,7 @@ class GraphAssembler:
         aliases_by_node_id: dict[str, set[str]] = {}
         entity_types_by_node_id: dict[str, str | None] = {}
         fact_properties: list[FactPropertyIndexEntry] = []
+        retired_nodes: list[MemoryNode] = []
         edges: list[HyperEdge] = []
 
         event_node = self.node_builder.build_event_node(extraction.events, context)
@@ -98,14 +100,15 @@ class GraphAssembler:
                 updated_at=utc_now_iso(),
             )
             fact_properties.append(fact_property)
-            retired_nodes, correction_edges, retired_properties = self.maintenance.retire_conflicting_facts(
+            newly_retired_nodes, correction_edges, retired_properties = self.maintenance.retire_conflicting_facts(
                 property_key=fact_property.property_key,
                 new_fact=fact_node,
                 assertion=assertion,
                 context=context,
                 correction_edge_builder=self.hyperedge_builder.build_correction_edge,
             )
-            for retired_node in retired_nodes:
+            retired_nodes.extend(newly_retired_nodes)
+            for retired_node in newly_retired_nodes:
                 nodes_by_id[retired_node.node_id] = retired_node
             edges.extend(correction_edges)
             fact_properties.extend(retired_properties)
@@ -145,6 +148,7 @@ class GraphAssembler:
         alias_entries = self._alias_entries(context.namespace, aliases_by_node_id, entity_types_by_node_id)
         return (
             list(nodes_by_id.values()),
+            retired_nodes,
             dedupe_edges(edges),
             dedupe_clusters(clusters),
             dedupe_cluster_members(cluster_members),

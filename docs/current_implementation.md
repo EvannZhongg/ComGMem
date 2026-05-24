@@ -112,7 +112,7 @@ edge_clusters:
 - `QdrantVectorStore` 是当前默认实现，使用本地 embedded Qdrant 路径 `runs/c_hypermem/vector_index`。
 - 当前只索引 LocalGraph 中的三元组，包括 fact SPO 和 event participant 等局部 triple；不索引节点全文、超边或 cluster。
 - 写入 Qdrant 前，三元组会按 `subject predicate object` 直接拼接为句子字符串作为 embedding 输入，例如 `Alice prefers morning interviews`。
-- SQLite 仍是 canonical store；Qdrant 只作为可重建的旁路索引。`Memory.reset(namespace)` 会同步删除该 namespace 的向量点。
+- SQLite 仍是 canonical store；Qdrant 只作为可重建的旁路索引。`Memory.reset(namespace)` 会同步删除该 namespace 的向量点；LLM 维护流程退役旧 fact 时，也会删除该旧 fact 下三元组对应的向量点，避免退役事实被向量召回。
 - 若未配置 embedding client/model，则不会默认创建向量索引；若配置了 embedding 且 `index.vector=qdrant`，`Memory` 会创建默认 Qdrant vector store。
 
 ## 7. 检索现状

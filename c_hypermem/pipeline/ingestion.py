@@ -90,9 +90,11 @@ class IngestionPipeline:
         window = ExtractionWindow(context=list(recent_messages or []), target=messages)
         extraction = self.extractor.extract(window, context)
         assembly_context = AssemblyContext(namespace=namespace, metadata=metadata, current_turn=current_turn)
-        nodes, edges, edge_clusters, edge_cluster_members, entity_aliases, fact_properties = self.assembler.assemble(
-            extraction,
-            assembly_context,
+        nodes, retired_nodes, edges, edge_clusters, edge_cluster_members, entity_aliases, fact_properties = (
+            self.assembler.assemble(
+                extraction,
+                assembly_context,
+            )
         )
         nodes = self.local_graph_builder.build(nodes)
         if self.hyperedge_builder is not None:
@@ -121,6 +123,7 @@ class IngestionPipeline:
         )
         return IngestionOutput(
             nodes=nodes,
+            retired_nodes=retired_nodes,
             edges=edges,
             edge_clusters=edge_clusters,
             edge_cluster_members=edge_cluster_members,
