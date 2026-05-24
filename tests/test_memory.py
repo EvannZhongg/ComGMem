@@ -16,9 +16,9 @@ from c_hypermem.pipeline.entity_resolution import EntityResolution
 from c_hypermem.pipeline.local_graph_builder import LocalGraphBuilder
 from c_hypermem.pipeline.maintenance import GraphMaintenance
 from c_hypermem.pipeline.node_builder import NodeBuilder, collect_entities
-from c_hypermem.pipeline.extraction import ExtractionContext, LLMMemoryExtractor, _render_node_labels
+from c_hypermem.pipeline.extraction import ExtractionContext, ExtractionWindow, LLMMemoryExtractor, _render_node_labels
 from c_hypermem.retrieval.expansion import EdgeExpansion
-from c_hypermem.schema import ExtractedAssertion, ExtractedEntity, MemoryExtraction
+from c_hypermem.schema import ExtractedAssertion, ExtractedEntity, MemoryExtraction, Message
 from c_hypermem.stores.vector_store import collect_triple_index_items, triple_embedding_text
 from c_hypermem.utils.prompts import PromptRegistry
 
@@ -81,6 +81,7 @@ def test_sqlite_hyper_edges_use_member_table(tmp_path):
     memory.close()
 
     with sqlite3.connect(db_path) as conn:
+        tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()}
         node_columns = {row[1] for row in conn.execute("PRAGMA table_info(nodes)").fetchall()}
         edge_columns = {row[1] for row in conn.execute("PRAGMA table_info(hyper_edges)").fetchall()}
         member_columns = {row[1] for row in conn.execute("PRAGMA table_info(hyper_edge_members)").fetchall()}
@@ -104,6 +105,7 @@ def test_sqlite_hyper_edges_use_member_table(tmp_path):
     assert {"node_id"} <= alias_index_columns
     assert "entity_id" not in alias_index_columns
     assert "fact_id" not in fact_index_columns
+    assert "ingestion_cache" not in tables
 
 
 def test_default_config_includes_split_config_files():
@@ -123,6 +125,9 @@ def test_default_config_includes_split_config_files():
     assert config.embedding.api_key == os.getenv("CHYPERMEM_EMBEDDING_API_KEY", "${CHYPERMEM_EMBEDDING_API_KEY}")
     assert config.embedding.batch_size == 10
     assert default_raw["include"] == ["models.yaml", "node_labels.yaml"]
+    assert default_raw["ingestion"]["context_window_messages"] == 3
+    assert "incremental_build" not in default_raw["ingestion"]
+    assert config.ingestion.context_window_messages == 3
     assert "node_types" not in default_raw
     assert config.extraction.prompt == "extraction/memory_extraction.md"
     assert config.extraction.pass_node_labels_to_prompt
@@ -270,7 +275,10 @@ def test_extraction_prompt_injects_node_label_config():
     config = MemoryConfig.load("configs/default.yaml")
     extractor = LLMMemoryExtractor(config, llm=StaticLLM({}))
     prompt = extractor._render_prompt(
-        [],
+        ExtractionWindow(
+            context=[Message(role="user", content="My flight is to Beijing.")],
+            target=[Message(role="user", content="Book the 8 AM one.")],
+        ),
         ExtractionContext(namespace="prompt_ns", metadata={"session_id": "S1"}, current_turn=0),
     )
 
@@ -279,6 +287,69 @@ def test_extraction_prompt_injects_node_label_config():
     assert "- instruction:" in prompt
     assert "Other precise labels are allowed" in prompt
     assert "node_id" in prompt
+    assert "# Context: Recent History" in prompt
+    assert "# Target to Extract" in prompt
+    assert "[context:0]" in prompt
+    assert "[target:0]" in prompt
+    assert "extract memories only from Target" in prompt
+
+
+def test_add_memory_passes_recent_context_and_target_to_extractor(tmp_path):
+    extractor = RecordingWindowExtractor()
+    memory = Memory.from_config(
+        {
+            "storage": {"path": str(tmp_path / "memory.sqlite3")},
+            "ingestion": {"context_window_messages": 1},
+        },
+        extractor=extractor,
+    )
+    namespace = "window_interaction_ns"
+    memory.reset(namespace)
+
+    memory.add_memory("I am going to Beijing tomorrow.", namespace=namespace)
+    memory.add_memory("Book the 8 AM one.", namespace=namespace)
+    memory.close()
+
+    assert len(extractor.windows) == 2
+    assert [message.content for message in extractor.windows[0].context] == []
+    assert [message.content for message in extractor.windows[0].target] == ["I am going to Beijing tomorrow."]
+    assert [message.content for message in extractor.windows[1].context] == ["I am going to Beijing tomorrow."]
+    assert [message.content for message in extractor.windows[1].target] == ["Book the 8 AM one."]
+
+
+def test_add_batches_as_incremental_single_message_targets(tmp_path):
+    extractor = RecordingWindowExtractor()
+    memory = Memory.from_config(
+        {
+            "storage": {"path": str(tmp_path / "memory.sqlite3")},
+            "ingestion": {"context_window_messages": 2},
+        },
+        extractor=extractor,
+    )
+    namespace = "window_batch_ns"
+    memory.reset(namespace)
+
+    memory.add(
+        [
+            {"role": "user", "content": "Turn one."},
+            {"role": "assistant", "content": "Turn two."},
+            {"role": "user", "content": "Turn three."},
+        ],
+        namespace=namespace,
+    )
+    memory.close()
+
+    assert len(extractor.windows) == 3
+    assert [[message.content for message in window.target] for window in extractor.windows] == [
+        ["Turn one."],
+        ["Turn two."],
+        ["Turn three."],
+    ]
+    assert [[message.content for message in window.context] for window in extractor.windows] == [
+        [],
+        ["Turn one."],
+        ["Turn one.", "Turn two."],
+    ]
 
 
 def test_conflicting_fact_retires_old_fact_and_adds_correction_edge(tmp_path):
@@ -549,6 +620,15 @@ class SequenceExtractor:
         payload = self.payloads[self.index]
         self.index += 1
         return MemoryExtraction.model_validate(payload)
+
+
+class RecordingWindowExtractor:
+    def __init__(self):
+        self.windows = []
+
+    def extract(self, window, context):
+        self.windows.append(window)
+        return MemoryExtraction()
 
 
 class StaticLLM:

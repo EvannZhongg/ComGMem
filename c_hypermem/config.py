@@ -30,7 +30,7 @@ class ModelConfig(BaseModel):
 
 class IngestionConfig(BaseModel):
     event_mode: str = "interaction"
-    incremental_build: bool = False
+    context_window_messages: int = 3
     max_facts_per_event: int = 12
     extractor: str | None = None
 

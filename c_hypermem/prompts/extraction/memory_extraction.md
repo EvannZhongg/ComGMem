@@ -50,7 +50,7 @@ Return exactly one JSON object:
       "type": "person",
       "labels": ["entity"],
       "aliases": [],
-      "source_ref": "message:0"
+      "source_ref": "target:0"
     }
   ],
   "events": [
@@ -61,7 +61,7 @@ Return exactly one JSON object:
         {"name": "Alice", "role": "speaker"}
       ],
       "labels": ["event"],
-      "source_ref": "message:0"
+      "source_ref": "target:0"
     }
   ],
   "assertions": [
@@ -72,12 +72,12 @@ Return exactly one JSON object:
       "polarity": "positive",
       "time": "2024-01-03",
       "labels": ["fact", "preference"],
-      "source_ref": "message:0"
+      "source_ref": "target:0"
     }
   ],
   "sources": [
     {
-      "ref": "message:0",
+      "ref": "target:0",
       "text": "Alice prefers morning interviews."
     }
   ]
@@ -109,6 +109,25 @@ Return exactly one JSON object:
 - **Single Source of Truth:** Use `assertions` as the ONLY carrier for facts, attributes, rules, and triples. Do not duplicate the same fact across different arrays.
 - **Contextual Completeness:** If an event or assertion relies on implicit context (e.g., "he", "it", "next week"), resolve the pronouns and relative times to absolute, explicit entities and timestamps where possible.
 
+# Incremental Input Contract
+
+The caller supplies two clearly separated sections:
+
+- `Context: Recent History`: a small sliding window of earlier messages. Use it
+  only to resolve pronouns, omitted subjects, relative time, and other
+  references in the target.
+- `Target to Extract`: the newest message or interaction segment. Extract
+  entities, events, assertions, and sources only when they are supported by this
+  target section.
+
+Never create a memory solely from Context. If Context says "I will go to
+Beijing" and Target says "Book the 8 AM one", you may use Context to understand
+the target, but the output must describe the new memory introduced or changed by
+Target. `source_ref` and `sources[].ref` should point to `target:N` refs, not
+`context:N` refs, unless the target explicitly quotes or corrects a context
+message.
+
 # Dynamic Input
 
-The interaction metadata and message span will be supplied below by the caller.
+The interaction metadata, recent context, and target span will be supplied below
+by the caller.

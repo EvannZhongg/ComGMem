@@ -18,10 +18,16 @@ class ExtractionContext:
     current_turn: int
 
 
+@dataclass(frozen=True)
+class ExtractionWindow:
+    context: list[Message]
+    target: list[Message]
+
+
 class MemoryExtractor(Protocol):
     """Produces compact semantic candidates from normalized messages."""
 
-    def extract(self, messages: list[Message], context: ExtractionContext) -> MemoryExtraction: ...
+    def extract(self, window: ExtractionWindow, context: ExtractionContext) -> MemoryExtraction: ...
 
 
 class LLMMemoryExtractor:
@@ -40,12 +46,12 @@ class LLMMemoryExtractor:
         self.llm = llm or OpenAICompatibleLLM(config.llm)  # type: ignore[arg-type]
         self.prompt_registry = prompt_registry or PromptRegistry()
 
-    def extract(self, messages: list[Message], context: ExtractionContext) -> MemoryExtraction:
-        prompt = self._render_prompt(messages, context)
+    def extract(self, window: ExtractionWindow, context: ExtractionContext) -> MemoryExtraction:
+        prompt = self._render_prompt(window, context)
         payload = self.llm.generate_json(prompt)
         return normalize_extraction_payload(payload)
 
-    def _render_prompt(self, messages: list[Message], context: ExtractionContext) -> str:
+    def _render_prompt(self, window: ExtractionWindow, context: ExtractionContext) -> str:
         prompt_id = _prompt_id_from_path(self.config.extraction.prompt)
         prompt = self.prompt_registry.load(prompt_id)
         prompt_text = _render_prompt_template(prompt.text, self.config)
@@ -55,13 +61,17 @@ class LLMMemoryExtractor:
             "# Interaction Metadata",
             _compact_json(context.metadata),
             "",
-            "# Interaction Span",
-            _render_messages(messages),
+            "# Context: Recent History",
+            _render_messages(window.context, ref_prefix="context") or "None",
+            "",
+            "# Target to Extract",
+            _render_messages(window.target, ref_prefix="target"),
             "",
             "# Strict JSON Shape",
             (
                 'Return one JSON object with keys "entities", "events", "assertions", and "sources". '
                 "Use assertions as the single carrier for facts, attributes, and triples. "
+                "Use Context only to resolve references and extract memories only from Target. "
                 "Do not output node_id, edge_id, entity_id, triple_id, confidence, salience, weight, or graph structure."
             ),
         ]
@@ -143,11 +153,11 @@ def _render_prompt_template(template: str, config: MemoryConfig) -> str:
     return template.replace("{{NODE_LABELS}}", node_labels)
 
 
-def _render_messages(messages: list[Message]) -> str:
+def _render_messages(messages: list[Message], *, ref_prefix: str = "message") -> str:
     rendered = []
     for index, message in enumerate(messages):
         timestamp = f" time={message.timestamp}" if message.timestamp else ""
-        rendered.append(f"[{index}] role={message.role}{timestamp}\n{truncate(message.content, 4000)}")
+        rendered.append(f"[{ref_prefix}:{index}] role={message.role}{timestamp}\n{truncate(message.content, 4000)}")
     return "\n\n".join(rendered)
 
 

@@ -9,7 +9,7 @@ from c_hypermem.llms.openai_compatible import OpenAICompatibleLLM
 from c_hypermem.pipeline.assembly import GraphAssembler
 from c_hypermem.pipeline.context import AssemblyContext
 from c_hypermem.pipeline.edge_cluster_builder import EdgeClusterBuilder
-from c_hypermem.pipeline.extraction import ExtractionContext, MemoryExtractor
+from c_hypermem.pipeline.extraction import ExtractionContext, ExtractionWindow, MemoryExtractor
 from c_hypermem.pipeline.hyperedge_builder import HyperEdgeBuilder
 from c_hypermem.pipeline.local_graph_builder import LocalGraphBuilder
 from c_hypermem.pipeline.maintenance import GraphMaintenance
@@ -45,31 +45,15 @@ class IngestionPipeline:
         *,
         namespace: str,
         current_turn: int,
+        recent_messages: list[Message] | None = None,
     ) -> IngestionOutput:
-        messages: list[Message] = []
-        if interaction.user_input:
-            messages.append(interaction.user_input)
-        if interaction.assistant_output:
-            messages.append(interaction.assistant_output)
-        for observation in interaction.observations:
-            messages.append(
-                Message(
-                    role=f"observation:{observation.type}",
-                    content=observation.content,
-                    timestamp=observation.timestamp,
-                    metadata=observation.metadata,
-                )
-            )
-        metadata = dict(interaction.metadata)
-        if interaction.tool_calls:
-            metadata["tool_calls"] = [call.model_dump(mode="json") for call in interaction.tool_calls]
-        if interaction.tool_results:
-            metadata["tool_results"] = [result.model_dump(mode="json") for result in interaction.tool_results]
-        if interaction.attachments:
-            metadata["attachments"] = [attachment.model_dump(mode="json") for attachment in interaction.attachments]
-        if interaction.trace:
-            metadata["trace"] = interaction.trace
-        return self._ingest_messages(messages, namespace=namespace, metadata=metadata, current_turn=current_turn)
+        return self._ingest_messages(
+            interaction_messages(interaction),
+            recent_messages=recent_messages,
+            namespace=namespace,
+            metadata=interaction_metadata(interaction),
+            current_turn=current_turn,
+        )
 
     def ingest_batch(
         self,
@@ -77,9 +61,11 @@ class IngestionPipeline:
         *,
         namespace: str,
         current_turn: int,
+        recent_messages: list[Message] | None = None,
     ) -> IngestionOutput:
         return self._ingest_messages(
             batch.messages,
+            recent_messages=recent_messages,
             namespace=namespace,
             metadata=batch.metadata,
             current_turn=current_turn,
@@ -89,6 +75,7 @@ class IngestionPipeline:
         self,
         messages: list[Message],
         *,
+        recent_messages: list[Message] | None,
         namespace: str,
         metadata: dict[str, Any],
         current_turn: int,
@@ -100,7 +87,8 @@ class IngestionPipeline:
                 "No memory extractor is configured. Pass an explicit extractor to Memory(...)."
             )
         context = ExtractionContext(namespace=namespace, metadata=metadata, current_turn=current_turn)
-        extraction = self.extractor.extract(messages, context)
+        window = ExtractionWindow(context=list(recent_messages or []), target=messages)
+        extraction = self.extractor.extract(window, context)
         assembly_context = AssemblyContext(namespace=namespace, metadata=metadata, current_turn=current_turn)
         nodes, edges, edge_clusters, edge_cluster_members, entity_aliases, fact_properties = self.assembler.assemble(
             extraction,
@@ -139,3 +127,34 @@ class IngestionPipeline:
             entity_aliases=entity_aliases,
             fact_properties=fact_properties,
         )
+
+
+def interaction_messages(interaction: AgentInteraction) -> list[Message]:
+    messages: list[Message] = []
+    if interaction.user_input:
+        messages.append(interaction.user_input)
+    if interaction.assistant_output:
+        messages.append(interaction.assistant_output)
+    for observation in interaction.observations:
+        messages.append(
+            Message(
+                role=f"observation:{observation.type}",
+                content=observation.content,
+                timestamp=observation.timestamp,
+                metadata=observation.metadata,
+            )
+        )
+    return messages
+
+
+def interaction_metadata(interaction: AgentInteraction) -> dict[str, Any]:
+    metadata = dict(interaction.metadata)
+    if interaction.tool_calls:
+        metadata["tool_calls"] = [call.model_dump(mode="json") for call in interaction.tool_calls]
+    if interaction.tool_results:
+        metadata["tool_results"] = [result.model_dump(mode="json") for result in interaction.tool_results]
+    if interaction.attachments:
+        metadata["attachments"] = [attachment.model_dump(mode="json") for attachment in interaction.attachments]
+    if interaction.trace:
+        metadata["trace"] = interaction.trace
+    return metadata

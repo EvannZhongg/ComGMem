@@ -16,6 +16,7 @@
 - 仅读取 C-HyperMem 项目根目录下的 `.env`，当前可以直接使用`.env`调用模型进行测试。
 - `.env` 已加入 `.gitignore`，仓库提供 `.env.example`。
 - `embedding.batch_size` 已加入配置，默认值为 `10`。
+- `ingestion.context_window_messages` 控制传给抽取模型的最近上下文消息数，默认值为 `3`。
 - `index.vector` 默认改为 `qdrant`；`index.vector_store` 提供本地 Qdrant 路径和 collection 名称，默认无需用户额外配置服务端。
 - 当前默认节点标签包括：`turn/event/fact/entity/state/preference/task/instruction/tool`。
 - `default_policy` 是系统内部 fallback 策略；传入 prompt 时不会以 `default_policy` 名称暴露给 LLM。
@@ -48,6 +49,10 @@ Memory.add_memory/add
 已实现内容：
 
 - 一次抽取：`LLMMemoryExtractor` 渲染 `prompts/extraction/memory_extraction.md`。
+- 抽取输入已改为 `ExtractionWindow(context, target)`：
+  - `context` 是最近 K 条消息，仅用于代词、时间和省略信息消解。
+  - `target` 是当前最新消息或交互片段，LLM 只能从 target 中抽取新增记忆。
+  - `add_memory(...)` 每次把当前 interaction 作为 target；`add(messages)` 会按消息顺序逐条模拟增量 target。
 - `node_labels.yaml` 的启用标签描述会注入抽取 prompt 的 `{{NODE_LABELS}}`。
 - 抽取输出归一化为 `MemoryExtraction`。
 - `assertions` 是当前构建事实节点的主输入：每条 assertion 会转为 `fact` 节点、LocalNodeGraph triple、property index 和基础超边成员。
@@ -98,9 +103,6 @@ edge_clusters:
 - `edge_cluster_members`
 - `entity_alias_index`
 - `fact_property_index`
-- `ingestion_cache`
-
-其中 `ingestion_cache` 表已预留，但增量缓存逻辑尚未正式启用。
 
 向量索引当前通过 `c_hypermem/stores/vector_store.py` 接入：
 
@@ -137,7 +139,7 @@ edge_clusters:
 
 当前实现仍低于设计文档的部分：
 
-- 增量构建缓存只实现了 `ingestion_cache` 表结构，尚未实现 cache cursor、prefix hash、append-only/rebuild 判断。
+- 应用层 hash/cache 游标已按 `development_architecture.md` 7.2 删除；增量抽取通过 Context/Target 滑动窗口实现，并依赖模型服务的 prompt caching。
 - 维护 prompt 已存在；`contradiction_check` 已接入主流程，但 `fact_merge/edge_merge/edge_conflict_check/edge_cluster_merge` 的 LLM 调用链尚未接入。
 - `turn/state/task/instruction/tool` 已作为标签配置存在，但尚未都有专门构建策略；当前主要依靠 LLM 输出 labels 和统一节点结构承载。
 - 向量索引配置和 embedding client 已有，但检索主流程仍以 lexical recall 为主，尚未启用完整向量召回链路。
@@ -184,10 +186,10 @@ edge_clusters:
   当前方案：写入侧先只把三元组拼接为 `subject predicate object` 句子后 embedding 到 Qdrant；检索侧仍为 lexical recall + 简单 HyperEdge expansion + 少量结构化加分。
   原因：先建立可重建的向量索引层和 payload 结构，再逐步接入 triple/node/hyperedge/cluster 的混合召回策略，避免一开始就把召回质量问题和写入结构问题混在一起。
 
-- **增量构建缓存**  
-  设计方向：prefix hash、config hash、prompt hash、append-only/rebuild 判断。  
-  当前方案：只预留表结构，不参与写入决策。  
-  原因：缓存一旦误判会造成旧事实解释不更新。需要先稳定冲突维护和实体消歧后再启用。
+- **事件驱动增量抽取**
+  设计方向：每次只抽取最新 target，同时提供最近上下文辅助理解。
+  当前方案：删除 `ingestion_cache` 表和应用层 hash/cache 游标配置；`LLMMemoryExtractor` 接收 `ExtractionWindow(context, target)`，`context_window_messages` 控制上下文 K。
+  原因：避免在应用层维护容易失真的 prefix/cursor 状态机，把重复 system prompt 的成本交给模型服务端 prompt caching，同时保留必要的语境消解能力。
 
 这些轻量方案的原则是：先保证统一 schema、系统生成 ID、一次抽取和基础写入闭环稳定，再逐步补维护和检索增强。
 
@@ -232,6 +234,8 @@ edge_clusters:
 - 默认配置和 split config 加载。
 - `.env` 模型变量解析。
 - embedding `batch_size` 配置和分批调用。
+- Context/Target 增量抽取窗口。
+- SQLite schema 不再创建 `ingestion_cache`。
 - 默认向量后端配置为 Qdrant。
 - 三元组向量索引写入时使用 `subject predicate object` 拼接句子作为 embedding 输入。
 - 统一节点 schema 和 SQLite 表结构。

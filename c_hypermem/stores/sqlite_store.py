@@ -39,7 +39,6 @@ class SQLiteStore:
                 "nodes",
                 "fact_property_index",
                 "entity_alias_index",
-                "ingestion_cache",
             ]:
                 self.conn.execute(f"DELETE FROM {table} WHERE namespace = ?", (namespace,))
 
@@ -689,20 +688,6 @@ class SQLiteStore:
                     CREATE INDEX IF NOT EXISTS idx_entity_alias_lookup
                         ON entity_alias_index(namespace, normalized_alias, entity_type);
 
-                    CREATE TABLE IF NOT EXISTS ingestion_cache (
-                        namespace TEXT NOT NULL,
-                        conversation_id TEXT NOT NULL,
-                        system_prompt_hash TEXT,
-                        memory_config_hash TEXT,
-                        prompt_template_hash TEXT,
-                        processed_prefix_hash TEXT,
-                        last_processed_turn_index INTEGER,
-                        last_processed_message_id TEXT,
-                        last_event_id TEXT,
-                        metadata_json TEXT NOT NULL,
-                        updated_at TEXT NOT NULL,
-                        PRIMARY KEY (namespace, conversation_id)
-                    );
                     """
                 )
         except sqlite3.DatabaseError as exc:

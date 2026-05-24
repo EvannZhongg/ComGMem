@@ -10,6 +10,7 @@ from c_hypermem.pipeline import IngestionPipeline
 from c_hypermem.pipeline.edge_cluster_builder import EdgeClusterBuilder
 from c_hypermem.pipeline.extraction import LLMMemoryExtractor, MemoryExtractor
 from c_hypermem.pipeline.hyperedge_builder import HyperEdgeBuilder
+from c_hypermem.pipeline.ingestion import interaction_messages
 from c_hypermem.retrieval import Retriever
 from c_hypermem.schema import AgentInteraction, MemoryImportBatch, Message
 from c_hypermem.stores import SQLiteStore
@@ -57,6 +58,7 @@ class Memory:
         )
         self.retriever = Retriever(self.store, config.retrieval)
         self._turn_counters: dict[str, int] = {}
+        self._message_history: dict[str, list[Message]] = {}
 
     @classmethod
     def from_config(
@@ -85,6 +87,7 @@ class Memory:
         if self.vector_store is not None:
             self.vector_store.delete_namespace(namespace)
         self._turn_counters[namespace] = 0
+        self._message_history[namespace] = []
 
     def add_memory(
         self,
@@ -110,13 +113,16 @@ class Memory:
                 "metadata": metadata or {},
             }
         )
-        current_turn = self._next_turn(namespace, increment=2)
+        target_messages = interaction_messages(interaction)
+        current_turn = self._next_turn(namespace, increment=max(1, len(target_messages)))
         output = self.ingestion.ingest_interaction(
             interaction,
             namespace=namespace,
             current_turn=current_turn,
+            recent_messages=self._recent_context(namespace),
         )
         self._persist_output(output)
+        self._remember_messages(namespace, target_messages)
 
     def add(
         self,
@@ -125,10 +131,17 @@ class Memory:
         metadata: dict[str, Any] | None = None,
     ) -> None:
         message_objs = _normalize_messages(messages)
-        batch = MemoryImportBatch(messages=message_objs, metadata=metadata or {})
-        current_turn = self._next_turn(namespace, increment=max(1, len(message_objs)))
-        output = self.ingestion.ingest_batch(batch, namespace=namespace, current_turn=current_turn)
-        self._persist_output(output)
+        for message in message_objs:
+            batch = MemoryImportBatch(messages=[message], metadata=metadata or {})
+            current_turn = self._next_turn(namespace, increment=1)
+            output = self.ingestion.ingest_batch(
+                batch,
+                namespace=namespace,
+                current_turn=current_turn,
+                recent_messages=self._recent_context(namespace),
+            )
+            self._persist_output(output)
+            self._remember_messages(namespace, [message])
 
     def search(
         self,
@@ -164,6 +177,20 @@ class Memory:
         nodes = self.store.get_nodes(namespace, node_ids)
         touched = [touch_node_access(node, current_turn) for node in nodes]
         self.store.upsert_nodes(touched)
+
+    def _recent_context(self, namespace: str) -> list[Message]:
+        window_size = max(0, self.config.ingestion.context_window_messages)
+        if window_size == 0:
+            return []
+        return list(self._message_history.get(namespace, [])[-window_size:])
+
+    def _remember_messages(self, namespace: str, messages: list[Message]) -> None:
+        window_size = max(0, self.config.ingestion.context_window_messages)
+        if window_size == 0 or not messages:
+            self._message_history[namespace] = []
+            return
+        history = [*self._message_history.get(namespace, []), *messages]
+        self._message_history[namespace] = history[-window_size:]
 
     def _persist_output(self, output: Any) -> None:
         self.store.upsert_nodes(output.nodes)

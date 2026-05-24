@@ -1148,91 +1148,69 @@ add_memory(user_input, assistant_output, namespace, metadata, tool_calls, ...)
 
 注意：这里的 adapter 是外部调用方角色，不是 C-HyperMem 核心依赖。C-HyperMem 只接受通用事件或批量导入数据，不感知 `agent_memory_eval` 的 dataclass。
 
-### 7.2 增量构建缓存策略
+### 7.2 事件驱动的增量抽取（Event-Driven Incremental Extraction）
 
-可以引入缓存策略，但建议设计成确定性的本地 cache lookup，而不是额外增加一轮 LLM 判断。
+放弃在应用层维护复杂的 Hash 缓存状态机（如 `prefix_hash`、游标等）。现代大模型 API 底层已原生支持 Prompt Caching，因此应用层应全面拥抱“事件驱动”的天然增量设计。
 
-目标：
+目标：- 每次交互（`add_memory`）仅对当前最新轮次进行记忆抽取。- 不重复抽取历史轮次的事实，避免 Token 浪费与图谱冗余。- 利用大模型 API 的原生 KV Cache 降低 System Prompt 的反复处理成本。**微型滑动窗口（Sliding Window Context）策略**：
 
-- 第一轮对话或首次写入时，全量构建当前输入。
-- 后续写入时，如果 system prompt、构建配置和历史上下文前缀都没有变化，只处理新增上下文部分。
-- 如果关键条件变化，则触发全量重建或局部重建。
-
-缓存判断应基于 hash、版本号和 cursor：
-
-```python
-{
-    "namespace": "sample_001",
-    "conversation_id": "conv_001",
-    "system_prompt_hash": "sha256:...",
-    "memory_config_hash": "sha256:...",
-    "prompt_template_hash": "sha256:...",
-    "processed_prefix_hash": "sha256:...",
-    "last_processed_turn_index": 12,
-    "last_processed_message_id": "msg_012",
-    "last_event_id": "event:S1:0",
-    "updated_at": "2026-05-22T10:15:00"
-}
-```
-
-推荐流程：
+在调用 `memory_extraction.md` 时，不应仅传入当前单句话（会导致严重的代词指代不明），也不应传入全量历史。应构造如下 Payload 传给大模型：
 
 ```text
-resolve ingestion cache:
-  if no cache:
-    mode = full_build
-  elif system_prompt_hash changed:
-    mode = full_rebuild
-  elif memory_config_hash or prompt_template_hash changed:
-    mode = rebuild_affected
-  elif processed_prefix_hash matches current message prefix:
-    mode = append_only
-  else:
-    mode = conservative_full_rebuild
+[Stable System Prompt & Extraction Schema]
+... (这部分保持绝对稳定，由大模型服务商底层进行 Prompt Caching) ...
 
-append_only:
-  process interactions/messages after last_processed_turn_index
-  attach new nodes to existing MemoryNodes / HyperEdges
-  update cache cursor and prefix hash
+[Context: Recent History (最近 2-3 轮，仅供理解语境，不要从中抽取)]
+User(N-2): 我明天要去北京出差。
+Assistant(N-2): 好的，需要帮您看机票吗？
+User(N-1): 要的。
+
+[Target to Extract: 当前最新轮次 (仅对这部分进行抽取)]
+Assistant(N): 已经为您查询到航班。
+User(N): 帮我订早上 8 点那班，另外我是素食主义者，帮我备注一下航空餐。
 ```
 
-这样不会额外增加模型调用，只多一次本地缓存读取和 hash 对比。真正的 LLM 调用仍然只发生在需要抽取新增内容，或维护 prompt 被触发时。
+通过明确区分 [Context] 和 [Target]，模型既能完成代词消解（知道“早上 8 点”是去北京的航班），又严格只输出第 N 轮新增的记忆对象。
 
-### 7.3 标志位建议
+### 7.3 批量导入与长会话的分块处理
 
-可以在 `metadata` 或内部 cache 中维护几个标志位：
+在处理 agent_memory_eval 传入的完整历史 MemorySession（即调用 add(messages) 批量导入）时，系统不能将几十轮对话一次性作为 Target 送入 LLM（会导致严重的 Attention 衰减和信息遗漏）。
 
-```python
-{
-    "is_first_turn": false,
-    "system_prompt_changed": false,
-    "config_changed": false,
-    "history_prefix_unchanged": true,
-    "append_only": true,
-    "requires_rebuild": false
-}
+分块滑动抽取（Chunked Sliding Extraction）：
+
+将长会话按轮次（例如每 4 轮为一个 Chunk）切片，模拟在线流式交互的顺序，依次调用增量抽取。
+
+```text
+Chunk 1: Extract(Target=Turns 1-4, Context=None)
+Chunk 2: Extract(Target=Turns 5-8, Context=Turns 3-4)
+...
 ```
 
-这些标志位不建议由 LLM 判断，应由确定性逻辑产生：
 
-- `system_prompt_changed`：比较 system prompt hash。
-- `config_changed`：比较 memory 构建相关配置 hash。
-- `history_prefix_unchanged`：比较已处理消息前缀 hash。
-- `append_only`：当前消息列表是否只是在已处理前缀后追加。
-- `requires_rebuild`：上述任一关键条件不满足时置为 true。
+这种方式在工程实现上极为简单一致，无论是实时单次对话，还是历史数据灌库，底层都复用同一套微型滑动窗口抽取逻辑。
 
-### 7.4 缓存风险与处理
+### 7.4 增量抽取下的图谱更新风险
 
-增量构建的主要风险是：新消息可能改变旧事实的解释、有效期或实体消歧。例如用户纠正了旧信息，或者新上下文让旧事件的主体发生变化。
+增量抽取意味着我们“只读新消息”，但这绝不等于“图谱只进行 Append-only 的追加写入”。新消息极有可能改变旧事实的解释、有效期或实体消歧结果。
 
-因此 append-only 不代表只写新节点，还需要允许维护旧节点：
+例如用户纠正了旧信息：
 
-- 新事实与旧事实冲突时，不物理覆盖旧 fact，而是将旧 fact 标记为 `retired` / `invalidated`，并保留新 fact。
-- 新事实补充旧事件时，可以更新旧的带 `event` 标签节点的 `local_graph`。
-- 新实体消歧后，可以重连相关 `HyperEdge`。
-- 新语义聚合形成后，可以把相关 HyperEdge 挂到新的或已有 `EdgeCluster`，而不是强行合并旧 HyperEdge。
 
-也就是说，缓存策略减少“输入读取和重复抽取”，但不禁止“对旧图结构做必要维护”。
+```text
+Turn 10 抽取 (旧事实): [Toby, is_a, dog]
+Turn 50 抽取 (新事实): [Toby, is_a, cat]
+```
+
+如果系统只管追加，图谱中将同时存在两条矛盾事实。因此，写入阶段必须包含确定性的图谱维护逻辑：
+
+事实防重与退役：系统必须在写入新 assertion 前，构造 property_key 检索旧事实。若发现冲突，不物理覆盖旧节点，而是将旧 fact 标记为 retired / invalidated，保留新 fact，并生成 correction 类型的 HyperEdge。
+
+局部图谱更新：新事实补充旧事件时，可以更新旧 event 节点的 local_graph。
+
+动态聚类：新语义关联形成后，可以将相关 HyperEdge 挂载到现有的 EdgeCluster 中。
+
+结论：抽取是增量的（减少 LLM 的重复阅读），但图谱维护是全局的（确保认知的一致性和最新状态）。
+
 
 ### 7.5 冲突事实退役策略
 
