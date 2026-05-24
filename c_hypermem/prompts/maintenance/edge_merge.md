@@ -12,7 +12,7 @@ created as a new edge.
 
 This prompt is used only after deterministic retrieval finds highly overlapping
 topology: similar relation, compatible roles, overlapping members, source scope,
-and time hints. C-HyperMem will assign or reuse edge IDs.
+and time hints. System will assign or reuse edge IDs.
 
 # Input
 

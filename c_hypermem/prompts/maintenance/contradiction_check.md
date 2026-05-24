@@ -10,7 +10,7 @@ stage: property_key_overlap
 You decide whether a new SPO assertion contradicts existing facts with the same
 `property_key`.
 
-This prompt handles the most basic SPO-level conflict case. C-HyperMem will
+This prompt handles the most basic SPO-level conflict case. System will
 retire or invalidate old fact nodes, create correction edges, and update valid
 time when needed.
 

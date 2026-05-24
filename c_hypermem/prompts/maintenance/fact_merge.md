@@ -11,7 +11,7 @@ You decide whether a newly extracted SPO assertion should reuse, update, or stay
 separate from existing facts that share the same `property_key`.
 
 This prompt is used after extraction and after deterministic lookup finds facts
-with the same subject node and normalized predicate/property. C-HyperMem will
+with the same subject node and normalized predicate/property. System will
 handle IDs, timestamps, indexes, and graph writes.
 
 # Input
