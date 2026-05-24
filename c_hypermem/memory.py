@@ -18,7 +18,13 @@ from c_hypermem.stores.vector_store import (
     QdrantVectorStore,
     VectorRecord,
     VectorStore,
+    VectorIndexItem,
+    collect_edge_cluster_canonical_index_items,
+    collect_edge_cluster_variant_index_items,
+    collect_node_content_index_items,
+    collect_node_summary_index_items,
     collect_triple_index_items,
+    collect_turn_dialogue_index_item,
     make_vector_point_id,
 )
 from c_hypermem.utils.time import touch_node_access
@@ -45,10 +51,23 @@ class Memory:
             self.embedding_client = EmbeddingModelClient(config.embedding)
         self.vector_store = vector_store
         if self.vector_store is None and self.embedding_client is not None and config.index.vector == "qdrant":
-            self.vector_store = QdrantVectorStore(
-                path=config.index.vector_store.path,
-                collection_name=config.index.vector_store.collection_name,
-            )
+            self.vector_store = self._default_qdrant_vector_store("triple")
+        self.vector_stores: dict[str, VectorStore] = {}
+        if self.vector_store is not None:
+            self.vector_stores["triple"] = self.vector_store
+            if vector_store is not None:
+                for item_type in _VECTOR_INDEX_TYPES:
+                    self.vector_stores[item_type] = vector_store
+            elif self.embedding_client is not None and config.index.vector == "qdrant":
+                self.vector_stores.update(
+                    {
+                        "node_content": self._default_qdrant_vector_store("node_content"),
+                        "node_summary": self._default_qdrant_vector_store("node_summary"),
+                        "edge_cluster_canonical": self._default_qdrant_vector_store("edge_cluster_canonical"),
+                        "edge_cluster_variant": self._default_qdrant_vector_store("edge_cluster_variant"),
+                        "turn_dialogue": self._default_qdrant_vector_store("turn_dialogue"),
+                    }
+                )
         self.ingestion = IngestionPipeline(
             config,
             self.store,
@@ -84,8 +103,8 @@ class Memory:
 
     def reset(self, namespace: str = "default") -> None:
         self.store.reset_namespace(namespace)
-        if self.vector_store is not None:
-            self.vector_store.delete_namespace(namespace)
+        for store in _unique_vector_stores(self.vector_stores):
+            store.delete_namespace(namespace)
         self._turn_counters[namespace] = 0
 
     def add_memory(
@@ -124,6 +143,7 @@ class Memory:
             current_turn=current_turn,
             recent_messages=recent_messages,
         )
+        self._index_turn_dialogue(namespace, turn_id, current_turn, target_messages, interaction.metadata)
         self._persist_output(output)
 
     def add(
@@ -145,6 +165,7 @@ class Memory:
                 current_turn=current_turn,
                 recent_messages=recent_messages,
             )
+            self._index_turn_dialogue(namespace, turn_id, current_turn, [message], batch.metadata)
             self._persist_output(output)
 
     def search(
@@ -166,9 +187,22 @@ class Memory:
         return stats
 
     def close(self) -> None:
-        if self.vector_store is not None:
-            self.vector_store.close()
+        for store in _unique_vector_stores(self.vector_stores):
+            store.close()
         self.store.close()
+
+    def _default_qdrant_vector_store(self, item_type: str, *, client: Any | None = None) -> VectorStore:
+        collection_name = _vector_collection_name(self.config.index.vector_store.collection_name, item_type)
+        if client is not None:
+            return QdrantVectorStore.with_client(
+                path=self.config.index.vector_store.path,
+                collection_name=collection_name,
+                client=client,
+            )
+        return QdrantVectorStore(
+            path=self.config.index.vector_store.path,
+            collection_name=collection_name,
+        )
 
     def _next_turn(self, namespace: str) -> int:
         if namespace not in self._turn_counters:
@@ -192,35 +226,108 @@ class Memory:
 
     def _persist_output(self, output: Any) -> None:
         self.store.upsert_nodes(output.nodes)
-        self._delete_retired_triples(output.retired_nodes)
+        self._delete_retired_vectors(output.retired_nodes)
+        self._index_nodes(output.nodes)
         self._index_triples(output.nodes)
         self.store.upsert_edges(output.edges)
         self.store.upsert_edge_clusters(output.edge_clusters)
+        self._index_edge_clusters(output.edge_clusters)
         self.store.upsert_edge_cluster_members(output.edge_cluster_members)
         self.store.upsert_entity_aliases(output.entity_aliases)
         self.store.upsert_fact_properties(output.fact_properties)
 
-    def _delete_retired_triples(self, nodes: list[Any]) -> None:
-        if self.vector_store is None:
+    def _delete_retired_vectors(self, nodes: list[Any]) -> None:
+        if not self.vector_stores:
             return
-        ids = [
-            make_vector_point_id(node.namespace, triple.triple_id)
-            for node in nodes
-            for triple in node.local_graph.triples
-            if triple.triple_id is not None
-        ]
-        ids = list(dict.fromkeys(ids))
-        if ids:
-            self.vector_store.delete(ids)
+        ids_by_type: dict[str, list[str]] = {
+            "triple": [
+                make_vector_point_id(node.namespace, "triple", triple.triple_id)
+                for node in nodes
+                for triple in node.local_graph.triples
+                if triple.triple_id is not None
+            ],
+            "node_content": [
+                make_vector_point_id(node.namespace, "node_content", node.node_id)
+                for node in nodes
+            ],
+            "node_summary": [
+                make_vector_point_id(node.namespace, "node_summary", node.node_id)
+                for node in nodes
+            ],
+        }
+        for item_type, ids in ids_by_type.items():
+            store = self.vector_stores.get(item_type)
+            unique_ids = list(dict.fromkeys(ids))
+            if store is not None and unique_ids:
+                store.delete(unique_ids)
+
+    def _index_nodes(self, nodes: list[Any]) -> None:
+        self._index_items(
+            "node_content",
+            [
+                item
+                for item in collect_node_content_index_items(nodes)
+                if item.payload.get("node_status") == "active"
+            ],
+        )
+        self._index_items(
+            "node_summary",
+            [
+                item
+                for item in collect_node_summary_index_items(nodes)
+                if item.payload.get("node_status") == "active"
+            ],
+        )
 
     def _index_triples(self, nodes: list[Any]) -> None:
-        if self.vector_store is None or self.embedding_client is None:
-            return
         items = [
             item
             for item in collect_triple_index_items(nodes)
             if item.payload.get("owner_node_status") == "active" and item.payload.get("status") == "active"
         ]
+        self._index_items("triple", items)
+
+    def _index_edge_clusters(self, clusters: list[Any]) -> None:
+        self._index_items(
+            "edge_cluster_canonical",
+            [
+                item
+                for item in collect_edge_cluster_canonical_index_items(clusters)
+                if item.payload.get("status") == "active"
+            ],
+        )
+        self._index_items(
+            "edge_cluster_variant",
+            [
+                item
+                for item in collect_edge_cluster_variant_index_items(clusters)
+                if item.payload.get("status") == "active"
+            ],
+        )
+
+    def _index_turn_dialogue(
+        self,
+        namespace: str,
+        turn_id: str,
+        turn_index: int,
+        messages: list[Message],
+        metadata: dict[str, Any],
+    ) -> None:
+        item = collect_turn_dialogue_index_item(
+            namespace=namespace,
+            turn_id=turn_id,
+            turn_index=turn_index,
+            messages=messages,
+            metadata=metadata,
+        )
+        if item is None:
+            return
+        self._index_items("turn_dialogue", [item])
+
+    def _index_items(self, item_type: str, items: list[VectorIndexItem]) -> None:
+        store = self.vector_stores.get(item_type)
+        if store is None or self.embedding_client is None:
+            return
         if not items:
             return
         embeddings = self.embedding_client.embed([item.text for item in items])
@@ -233,7 +340,7 @@ class Memory:
             )
             for item, vector in zip(items, embeddings)
         ]
-        self.vector_store.upsert(records)
+        store.upsert(records)
 
 
 def _message_or_none(value: str | dict[str, Any] | None, *, default_role: str) -> dict[str, Any] | None:
@@ -263,3 +370,32 @@ def _with_turn_ids(metadata: dict[str, Any], turn_ids: list[str]) -> dict[str, A
     existing_ids = [str(item) for item in existing] if isinstance(existing, list) else []
     merged["turn_ids"] = list(dict.fromkeys([*existing_ids, *turn_ids]))
     return merged
+
+
+_VECTOR_INDEX_TYPES = [
+    "triple",
+    "node_content",
+    "node_summary",
+    "edge_cluster_canonical",
+    "edge_cluster_variant",
+    "turn_dialogue",
+]
+
+
+def _vector_collection_name(base_name: str, item_type: str) -> str:
+    if item_type == "triple":
+        return f"{base_name}_triples"
+    return f"{base_name}_{item_type}"
+
+
+def _unique_vector_stores(stores: dict[str, VectorStore]) -> list[VectorStore]:
+    unique: list[VectorStore] = []
+    seen: set[int] = set()
+    for store in stores.values():
+        client = getattr(store, "_client", None)
+        marker = id(client) if client is not None else id(store)
+        if marker in seen:
+            continue
+        seen.add(marker)
+        unique.append(store)
+    return unique

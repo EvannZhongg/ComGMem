@@ -19,7 +19,13 @@ from c_hypermem.pipeline.node_builder import NodeBuilder, collect_entities
 from c_hypermem.pipeline.extraction import ExtractionContext, ExtractionWindow, LLMMemoryExtractor, _render_node_labels
 from c_hypermem.retrieval.expansion import EdgeExpansion
 from c_hypermem.schema import ExtractedAssertion, ExtractedEntity, MemoryExtraction, Message
-from c_hypermem.stores.vector_store import collect_triple_index_items, make_vector_point_id, triple_embedding_text
+from c_hypermem.stores.vector_store import (
+    QdrantVectorStore,
+    collect_triple_index_items,
+    make_vector_point_id,
+    triple_embedding_text,
+    turn_dialogue_embedding_text,
+)
 from c_hypermem.utils.prompts import PromptRegistry
 
 
@@ -203,15 +209,130 @@ def test_memory_indexes_local_triples_as_sentence_strings(tmp_path):
         "Alice prefers morning interviews",
     ]
     assert fact_nodes
-    assert embedding_client.inputs == [expected_texts]
-    assert len(vector_store.records) == 2
-    record = next(item for item in vector_store.records if item.text == expected_texts[1])
+    assert embedding_client.inputs == [
+        [
+            "User: Alice prefers morning interviews.",
+        ],
+        [
+            "Alice discussed interview scheduling.",
+            "Alice",
+            "Alice prefers morning interviews",
+        ],
+        [
+            "Alice discussed interview scheduling.",
+            "Alice",
+            "Alice prefers morning interviews",
+        ],
+        expected_texts,
+        [
+            "evidence: supports_extracted_facts",
+            "Alice prefers morning interviews",
+        ],
+        [
+            "Alice discussed interview scheduling. supports 1 extracted fact(s).",
+            "Alice prefers morning interviews",
+        ],
+    ]
+    assert len(vector_store.records) == 13
+    item_types = [record.payload["item_type"] for record in vector_store.records]
+    assert item_types.count("turn_dialogue") == 1
+    assert item_types.count("node_content") == 3
+    assert item_types.count("node_summary") == 3
+    assert item_types.count("triple") == 2
+    assert item_types.count("edge_cluster_canonical") == 2
+    assert item_types.count("edge_cluster_variant") == 2
+    record = next(
+        item
+        for item in vector_store.records
+        if item.text == expected_texts[1] and item.payload["item_type"] == "triple"
+    )
     assert record.payload["item_type"] == "triple"
     assert record.payload["namespace"] == namespace
     assert record.payload["owner_node_id"] == fact_nodes[0].node_id
     assert record.payload["triple_id"] == fact_nodes[0].local_graph.triples[0].triple_id
     assert vector_store.deleted_namespaces == [namespace]
     assert vector_store.closed
+
+
+def test_turn_dialogue_vector_indexes_user_and_assistant_by_turn(tmp_path):
+    embedding_client = RecordingEmbeddingClient()
+    vector_store = RecordingVectorStore()
+    memory = Memory.from_config(
+        {"storage": {"path": str(tmp_path / "memory.sqlite3")}},
+        extractor=StaticExtractor(),
+        embedding_client=embedding_client,
+        vector_store=vector_store,
+    )
+    namespace = "turn_dialogue_vector_ns"
+    memory.reset(namespace)
+
+    memory.add_memory(
+        user_input="帮我查一下去北京的航班，另外我是素食主义者，帮我备注一下航空餐。",
+        assistant_output="已经为您查询到明天早上 8 点的航班，并为您备注了素食餐。",
+        namespace=namespace,
+        observations=[{"type": "tool", "content": "工具输出不应进入 turn dialogue 向量。"}],
+    )
+    memory.close()
+
+    turn_records = [
+        record
+        for record in vector_store.records
+        if record.payload["item_type"] == "turn_dialogue"
+    ]
+    assert len(turn_records) == 1
+    assert turn_records[0].text == (
+        "User: 帮我查一下去北京的航班，另外我是素食主义者，帮我备注一下航空餐。\n"
+        "Assistant: 已经为您查询到明天早上 8 点的航班，并为您备注了素食餐。"
+    )
+    assert turn_records[0].payload["namespace"] == namespace
+    assert turn_records[0].payload["turn_id"] == "turn:0"
+    assert turn_records[0].payload["turn_index"] == 0
+    assert turn_records[0].payload["roles"] == ["User", "Assistant"]
+    assert "工具输出" not in turn_records[0].text
+    assert turn_records[0].id == make_vector_point_id(namespace, "turn_dialogue", "turn:0")
+
+
+def test_turn_dialogue_embedding_text_skips_non_dialogue_roles():
+    text = turn_dialogue_embedding_text(
+        [
+            Message(role="user", content="Question"),
+            Message(role="observation:tool", content="Tool result"),
+            Message(role="assistant", content="Answer"),
+        ]
+    )
+
+    assert text == "User: Question\nAssistant: Answer"
+
+
+def test_default_qdrant_vector_stores_use_separate_collections(tmp_path):
+    memory = Memory.from_config(
+        {
+            "storage": {"path": str(tmp_path / "memory.sqlite3")},
+            "embedding": {"model": "embedding-test"},
+            "index": {
+                "vector": "qdrant",
+                "vector_store": {"path": str(tmp_path / "vectors"), "collection_name": "test_collection"},
+            },
+        },
+        extractor=StaticExtractor(),
+    )
+
+    stores = memory.vector_stores
+    collection_names = {
+        item_type: store.collection_name
+        for item_type, store in stores.items()
+        if isinstance(store, QdrantVectorStore)
+    }
+    memory.close()
+
+    assert collection_names == {
+        "triple": "test_collection_triples",
+        "node_content": "test_collection_node_content",
+        "node_summary": "test_collection_node_summary",
+        "edge_cluster_canonical": "test_collection_edge_cluster_canonical",
+        "edge_cluster_variant": "test_collection_edge_cluster_variant",
+        "turn_dialogue": "test_collection_turn_dialogue",
+    }
 
 
 def test_collect_triple_index_items_skips_unpersisted_triple_ids():
@@ -575,6 +696,59 @@ def test_edge_cluster_builder_reuses_existing_property_cluster(tmp_path):
     assert len(state_edges) == 2
     assert len(state_cluster_ids) == 1
     assert len(clusters) < len(edges)
+
+
+def test_reused_edge_cluster_appends_description_variants(tmp_path):
+    embedding_client = RecordingEmbeddingClient()
+    vector_store = RecordingVectorStore()
+    extractor = SequenceExtractor(
+        [
+            {
+                "entities": [{"name": "Alice"}],
+                "assertions": [{"subject": "Alice", "predicate": "loves", "object": "tea"}],
+            },
+            {
+                "entities": [{"name": "Alice"}],
+                "assertions": [{"subject": "Alice", "predicate": "loves", "object": "coffee"}],
+            },
+        ]
+    )
+    memory = Memory.from_config(
+        {"storage": {"path": str(tmp_path / "memory.sqlite3")}},
+        extractor=extractor,
+        maintenance_llm=MaintenanceLLM(
+            [
+                {
+                    "conflict_state": "compatible",
+                    "affected_existing_refs": [],
+                    "recommended_old_status": "active",
+                    "valid_time_update": {},
+                    "rationale": "A person can love both tea and coffee.",
+                }
+            ]
+        ),
+        embedding_client=embedding_client,
+        vector_store=vector_store,
+    )
+    namespace = "cluster_variant_reuse_ns"
+    memory.reset(namespace)
+
+    memory.add_memory("Alice loves tea.", namespace=namespace)
+    memory.add_memory("Alice loves coffee.", namespace=namespace)
+    clusters = memory.store.list_edge_clusters(namespace)
+    state_clusters = [cluster for cluster in clusters if "entity_state" in cluster.cluster_labels]
+    memory.close()
+
+    assert len(state_clusters) == 1
+    variant_texts = [variant.text for variant in state_clusters[0].description_variants]
+    assert variant_texts == ["Alice loves tea", "Alice loves coffee"]
+    indexed_variant_texts = [
+        record.text
+        for record in vector_store.records
+        if record.payload["item_type"] == "edge_cluster_variant"
+    ]
+    assert "Alice loves tea" in indexed_variant_texts
+    assert "Alice loves coffee" in indexed_variant_texts
 
 
 def test_retriever_delegates_graph_expansion(tmp_path):
