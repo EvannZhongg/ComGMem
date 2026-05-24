@@ -13,7 +13,7 @@
 
 - 默认配置入口为 `configs/default.yaml`。
 - 模型配置拆在 `configs/models.yaml`，节点标签配置拆在 `configs/node_labels.yaml`。
-- 仅读取 C-HyperMem 项目根目录下的 `.env`，不读取上级目录 `.env`。
+- 仅读取 C-HyperMem 项目根目录下的 `.env`，当前可以直接使用`.env`调用模型进行测试。
 - `.env` 已加入 `.gitignore`，仓库提供 `.env.example`。
 - `embedding.batch_size` 已加入配置，默认值为 `10`。
 - 当前默认节点标签包括：`turn/event/fact/entity/state/preference/task/instruction/tool`。
