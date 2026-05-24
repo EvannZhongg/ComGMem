@@ -18,6 +18,7 @@ dev = ["pytest>=8", "ruff>=0.5"]
 llms = ["openai>=1.0"]
 embeddings = ["openai>=1.0"]
 vector = ["qdrant-client>=1.9"]
+nlp = ["spacy>=3.7"]
 eval = []
 
 [tool.hatch.build.targets.wheel]

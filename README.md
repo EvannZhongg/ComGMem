@@ -10,6 +10,15 @@ python -m venv .venv
 pip install -e ".[llms,embeddings,vector,dev]"
 ```
 
+上面的命令会安装 LLM、embedding、Qdrant 向量库和开发测试依赖；不会安装 spaCy。
+
+如果需要启用 `retrieval.query_analysis: nlp`，再单独安装 NLP 依赖和 spaCy 英文模型：
+
+```powershell
+pip install -e ".[nlp]"
+python -m spacy download en_core_web_sm
+```
+
 在 `C-HyperMem\.env` 中配置模型环境变量，例如：
 
 ```powershell

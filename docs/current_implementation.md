@@ -264,7 +264,7 @@ edge_clusters:
 - SQLite `turns` 表保存交互历史，并为节点/边写入 `source_turn_ids`。
 - 默认向量后端配置为 Qdrant。
 - node-local-graph 向量索引按 node 聚合写入：一个 node 的 `content/triples` 拼成一段文本，只写入 1 个向量点，payload 中保留该 node 下所有 `triple_ids`。当前不再对散碎 triple 逐条 embedding。
-- 写入侧统一通过 `Memory._index_nodes_and_clusters(...)` 为 node-local-graph、node content、node summary、EdgeCluster canonical description 和 EdgeCluster variants 建索引；旧的 `_index_triples` 路径已废弃。
+- 写入侧统一通过 `Memory._index_nodes_and_clusters(...)` 为 node-local-graph、node content、node summary、EdgeCluster canonical description 和 EdgeCluster variants 建索引。
 - `MemoryNode.content` 和 `MemoryNode.summary` 分别写入独立向量 collection。
 - `EdgeCluster.canonical_description` 和 `description_variants` 分别写入独立向量 collection。
 - 复用已有 EdgeCluster 时会追加 description variant，并参与后续向量写入。

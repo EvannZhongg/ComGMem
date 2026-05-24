@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
@@ -164,6 +164,7 @@ class IndexConfig(BaseModel):
 
 
 class RetrievalConfig(BaseModel):
+    query_analysis: Literal[False, "llm", "nlp"] = False
     lexical_top_n: int = 30
     vector_top_n: int = 30
     edge_top_n: int = 30

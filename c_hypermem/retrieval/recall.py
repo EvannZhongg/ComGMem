@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from c_hypermem.config import RetrievalConfig
+from c_hypermem.llms.base import LLMClient
 from c_hypermem.retrieval.context import compose_result_content
 from c_hypermem.retrieval.expansion import Candidate, EdgeExpansion
-from c_hypermem.retrieval.query_analysis import QueryAnalyzer, QueryAnalysis
+from c_hypermem.retrieval.query_analysis import build_query_analyzer
 from c_hypermem.schema import MemoryNode, SearchResult
 from c_hypermem.stores.base import MemoryStore
 from c_hypermem.stores.lexical_store import LexicalScorer
@@ -11,10 +12,10 @@ from c_hypermem.utils.time import decay_weight
 
 
 class Retriever:
-    def __init__(self, store: MemoryStore, config: RetrievalConfig) -> None:
+    def __init__(self, store: MemoryStore, config: RetrievalConfig, *, query_analysis_llm: LLMClient | None = None) -> None:
         self.store = store
         self.config = config
-        self.analyzer = QueryAnalyzer()
+        self.analyzer = build_query_analyzer(config, llm=query_analysis_llm)
         self.lexical = LexicalScorer()
         self.expansion = EdgeExpansion(store, config)
 
@@ -35,37 +36,20 @@ class Retriever:
             candidate = candidates.setdefault(node.node_id, Candidate(node=node, score=0.0))
             candidate.score += lexical_score
             candidate.score_parts.update(parts)
-            self._apply_structural_scores(candidate, analysis, current_turn)
+            self._apply_access_scores(candidate, current_turn)
 
         if self.config.use_hyperedge_expansion and candidates:
             self.expansion.expand(namespace, candidates)
 
-        preferred = self._prefer_answer_nodes(candidates.values(), analysis)
-        ranked = sorted(preferred, key=lambda item: item.score, reverse=True)[:top_k]
-        return [self._to_result(candidate) for candidate in ranked]
+        ranked = sorted(candidates.values(), key=lambda item: item.score, reverse=True)[:top_k]
+        return [self._to_result(candidate, analysis_metadata=analysis.to_metadata()) for candidate in ranked]
 
-    def _apply_structural_scores(
+    def _apply_access_scores(
         self,
         candidate: Candidate,
-        analysis: QueryAnalysis,
         current_turn: int | None,
     ) -> None:
         node = candidate.node
-        if analysis.asks_preference and _has_label(node, "preference"):
-            candidate.score += 0.8
-            candidate.score_parts["preference_match"] = 0.8
-        if analysis.asks_task and _has_label(node, "task"):
-            candidate.score += 0.8
-            candidate.score_parts["task_match"] = 0.8
-        if _has_label(node, "entity") and any(hint.lower() == node.content.lower() for hint in analysis.entity_hints):
-            candidate.score += 0.5
-            candidate.score_parts["entity_match"] = 0.5
-        if analysis.time_hints:
-            world = node.time.world
-            haystack = " ".join(filter(None, [world.event_time, world.source_timestamp, node.metadata.get("date")]))
-            if any(hint in haystack for hint in analysis.time_hints):
-                candidate.score += 0.5
-                candidate.score_parts["temporal_match"] = 0.5
         if self.config.use_recency_decay:
             decay = decay_weight(
                 node.time.activation.inserted_turn,
@@ -80,22 +64,12 @@ class Retriever:
             candidate.score += access_bonus
             candidate.score_parts["access_boost"] = access_bonus
 
-    def _prefer_answer_nodes(
-        self,
-        candidates: list[Candidate],
-        analysis: QueryAnalysis,
-    ) -> list[Candidate]:
-        answer_types = {"fact", "preference", "task", "state", "event"}
-        answer_candidates = [candidate for candidate in candidates if answer_types.intersection(candidate.node.node_labels)]
-        if answer_candidates:
-            return answer_candidates
-        return list(candidates)
-
-    def _to_result(self, candidate: Candidate) -> SearchResult:
+    def _to_result(self, candidate: Candidate, *, analysis_metadata: dict) -> SearchResult:
         node = candidate.node
         metadata = {
             "node_labels": node.node_labels,
             "node_id": node.node_id,
+            "query_analysis": analysis_metadata,
             "source_session_id": node.metadata.get("source_session_id"),
             "source_event_id": node.metadata.get("source_event_id"),
             "source_turn_ids": node.metadata.get("source_turn_ids", []),
@@ -113,6 +87,3 @@ class Retriever:
             score=float(candidate.score),
             metadata=metadata,
         )
-
-def _has_label(node: MemoryNode, label: str) -> bool:
-    return label in node.node_labels

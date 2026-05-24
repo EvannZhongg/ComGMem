@@ -5,7 +5,9 @@ from typing import Any
 
 from c_hypermem.config import MemoryConfig
 from c_hypermem.embeddings import EmbeddingClient, EmbeddingModelClient
+from c_hypermem.errors import ConfigError
 from c_hypermem.llms.base import LLMClient
+from c_hypermem.llms.openai_compatible import OpenAICompatibleLLM
 from c_hypermem.pipeline import IngestionPipeline
 from c_hypermem.pipeline.edge_cluster_builder import EdgeClusterBuilder
 from c_hypermem.pipeline.extraction import LLMMemoryExtractor, MemoryExtractor
@@ -76,7 +78,12 @@ class Memory:
             edge_cluster_builder=edge_cluster_builder,
             maintenance_llm=maintenance_llm,
         )
-        self.retriever = Retriever(self.store, config.retrieval)
+        query_analysis_llm = None
+        if config.retrieval.query_analysis == "llm":
+            if config.llm is None:
+                raise ConfigError("retrieval.query_analysis='llm' requires config.llm.")
+            query_analysis_llm = OpenAICompatibleLLM(config.llm)
+        self.retriever = Retriever(self.store, config.retrieval, query_analysis_llm=query_analysis_llm)
         self._turn_counters: dict[str, int] = {}
 
     @classmethod

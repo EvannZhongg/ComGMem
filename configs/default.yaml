@@ -81,6 +81,8 @@ index:
     collection_name: c_hypermem_memory
 
 retrieval:
+  # Query analysis modes: false disables analysis for evaluation; "llm" uses prompts/retrieval/query_analysis.md; "nlp" uses optional spaCy processing.
+  query_analysis: false
   lexical_top_n: 30
   vector_top_n: 30
   edge_top_n: 30
