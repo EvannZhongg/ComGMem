@@ -223,10 +223,8 @@ def test_memory_indexes_node_local_graph_as_single_vector(tmp_path):
         ],
         [
             (
-                "【核心内容】: Alice discussed interview scheduling.\n"
-                "【属性】:\n"
-                '- participants: {"Alice": "speaker"}\n'
-                "【相关事实】:\n"
+                "Core content: Alice discussed interview scheduling.\n"
+                "Related facts:\n"
                 "- Alice participated_as speaker"
             ),
             fact_local_graph_text,
@@ -360,7 +358,7 @@ def test_collect_node_local_graph_index_items_builds_one_vector_per_node_and_ski
 
     assert fact.local_graph.triples[0].triple_id is None
     assert triple_embedding_text(fact.local_graph.triples[0]) == "Alice prefers tea"
-    assert node_local_graph_embedding_text(fact).startswith("【核心内容】: Alice prefers tea\n【属性】:")
+    assert node_local_graph_embedding_text(fact) == "Core content: Alice prefers tea"
     assert collect_node_local_graph_index_items([fact]) == []
 
 
@@ -657,8 +655,8 @@ def test_retired_fact_local_graph_vector_is_removed_from_vector_store(tmp_path):
 
     assert retired
     assert make_vector_point_id(namespace, "triple", retired[0].node_id) in vector_store.deleted_ids
-    assert any("【相关事实】:\n- Toby is_a dog" in record.text for record in vector_store.records)
-    assert any("【相关事实】:\n- Toby is_a cat" in record.text for record in vector_store.records)
+    assert any("Related facts:\n- Toby is_a dog" in record.text for record in vector_store.records)
+    assert any("Related facts:\n- Toby is_a cat" in record.text for record in vector_store.records)
 
 
 def test_edge_cluster_builder_reuses_existing_property_cluster(tmp_path):

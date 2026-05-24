@@ -122,18 +122,15 @@ edge_clusters:
   - `c_hypermem_memory_edge_cluster_canonical`
   - `c_hypermem_memory_edge_cluster_variant`
   - `c_hypermem_memory_turn_dialogue`
-- `triple` collection 当前实际保存的是 **node-local-graph 向量**：每个带 LocalGraph triples 的 `MemoryNode` 只写入 1 个向量点，而不是每条 triple 一个向量点。写入前会把节点核心内容、节点属性和该节点内部所有 triples 揉成一段完整文本，例如：
+- `triple` collection 当前实际保存的是 **node-local-graph 向量**：每个带 LocalGraph triples 的 `MemoryNode` 只写入 1 个向量点，而不是每条 triple 一个向量点。写入前会把节点核心内容和该节点内部所有 triples 揉成一段完整文本；`node.attributes` 不进入 embedding 文本，避免 `subject/predicate/object` 等已在 triples 中出现的信息重复加权。例如：
 
   ```text
-  【核心内容】: Alice prefers morning interviews
-  【属性】:
-  - predicate: prefers
-  - subject: Alice
-  【相关事实】:
+  Core content: Alice prefers morning interviews
+  Related facts:
   - Alice prefers morning interviews
   ```
 
-  payload 中保留 `node_id/triple_ids/triple_count/triples/node_metadata`。当一个 node 后续新增或更新 triples 时，会用同一个 `node_id` 生成的向量点 ID 覆盖更新该 node 的 local graph 向量；该向量可以被该 node 内每个 triple 通过 payload 中的 `triple_ids` 回指。
+  payload 中仍保留 `node_id/triple_ids/triple_count/triples/attributes/node_metadata`。当一个 node 后续新增或更新 triples 时，会用同一个 `node_id` 生成的向量点 ID 覆盖更新该 node 的 local graph 向量；该向量可以被该 node 内每个 triple 通过 payload 中的 `triple_ids` 回指。
 - `node_content` / `node_summary` 向量：索引 `MemoryNode.content` 和 `MemoryNode.summary` 原文，payload 中保留 `node_id/node_labels/status/time/metadata` 等信息。
 - `edge_cluster_canonical` 向量：索引 `EdgeCluster.canonical_description`，payload 中保留 `cluster_id/cluster_labels/conflict_state` 等信息。
 - `edge_cluster_variant` 向量：索引 `EdgeCluster.description_variants` 中的各个描述变体，payload 中保留 `cluster_id/variant_index/source_edge_id` 等信息。`BasicEdgeClusterBuilder` 复用已有 cluster 时会追加新的 description variant，并重新持久化 cluster。

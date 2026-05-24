@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import json
 from pathlib import Path
 from typing import Any, Protocol, Sequence
 from uuid import NAMESPACE_URL, uuid5
@@ -203,21 +202,11 @@ def node_local_graph_embedding_text(node: MemoryNode) -> str:
     lines: list[str] = []
     content = node.content.strip()
     if content:
-        lines.append(f"【核心内容】: {content}")
-
-    attributes = {
-        str(key): value
-        for key, value in node.attributes.items()
-        if value not in (None, "", [], {})
-    }
-    if attributes:
-        lines.append("【属性】:")
-        for key, value in sorted(attributes.items()):
-            lines.append(f"- {key}: {_payload_text(value)}")
+        lines.append(f"Core content: {content}")
 
     triples = [triple for triple in node.local_graph.triples if triple.triple_id is not None]
     if triples:
-        lines.append("【相关事实】:")
+        lines.append("Related facts:")
         for triple in triples:
             text = triple_embedding_text(triple)
             if text:
@@ -439,12 +428,6 @@ def _turn_dialogue_role_label(role: str) -> str | None:
     if normalized == "assistant":
         return "Assistant"
     return None
-
-
-def _payload_text(value: Any) -> str:
-    if isinstance(value, str):
-        return value
-    return json.dumps(value, ensure_ascii=False, sort_keys=True)
 
 
 def _collection_vector_size(collection: Any) -> int | None:
