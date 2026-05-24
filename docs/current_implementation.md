@@ -16,6 +16,7 @@
 - 仅读取 C-HyperMem 项目根目录下的 `.env`，当前可以直接使用`.env`调用模型进行测试。
 - `.env` 已加入 `.gitignore`，仓库提供 `.env.example`。
 - `embedding.batch_size` 已加入配置，默认值为 `10`。
+- `index.vector` 默认改为 `qdrant`；`index.vector_store` 提供本地 Qdrant 路径和 collection 名称，默认无需用户额外配置服务端。
 - 当前默认节点标签包括：`turn/event/fact/entity/state/preference/task/instruction/tool`。
 - `default_policy` 是系统内部 fallback 策略；传入 prompt 时不会以 `default_policy` 名称暴露给 LLM。
 
@@ -41,6 +42,7 @@ Memory.add_memory/add
   -> LLMMemoryExtractor 或显式 extractor
   -> GraphAssembler
   -> SQLiteStore
+  -> VectorStore(Qdrant, triple index)
 ```
 
 已实现内容：
@@ -100,6 +102,15 @@ edge_clusters:
 
 其中 `ingestion_cache` 表已预留，但增量缓存逻辑尚未正式启用。
 
+向量索引当前通过 `c_hypermem/stores/vector_store.py` 接入：
+
+- `VectorStore` 是向量存储抽象接口。
+- `QdrantVectorStore` 是当前默认实现，使用本地 embedded Qdrant 路径 `runs/c_hypermem/vector_index`。
+- 当前只索引 LocalGraph 中的三元组，包括 fact SPO 和 event participant 等局部 triple；不索引节点全文、超边或 cluster。
+- 写入 Qdrant 前，三元组会按 `subject predicate object` 直接拼接为句子字符串作为 embedding 输入，例如 `Alice prefers morning interviews`。
+- SQLite 仍是 canonical store；Qdrant 只作为可重建的旁路索引。`Memory.reset(namespace)` 会同步删除该 namespace 的向量点。
+- 若未配置 embedding client/model，则不会默认创建向量索引；若配置了 embedding 且 `index.vector=qdrant`，`Memory` 会创建默认 Qdrant vector store。
+
 ## 7. 检索现状
 
 检索代码暂时保持轻量实现：
@@ -130,6 +141,7 @@ edge_clusters:
 - 维护 prompt 已存在；`contradiction_check` 已接入主流程，但 `fact_merge/edge_merge/edge_conflict_check/edge_cluster_merge` 的 LLM 调用链尚未接入。
 - `turn/state/task/instruction/tool` 已作为标签配置存在，但尚未都有专门构建策略；当前主要依靠 LLM 输出 labels 和统一节点结构承载。
 - 向量索引配置和 embedding client 已有，但检索主流程仍以 lexical recall 为主，尚未启用完整向量召回链路。
+- 三元组向量写入已接入 Qdrant，但检索主流程仍未使用向量召回；当前只完成写入侧索引建设。
 - EdgeCluster 已按 topic fingerprint 查库复用并追加新边；尚未实现相似 cluster 召回、LLM cluster merge、后台宏观整理和复杂冲突状态维护。
 - LocalNodeGraph 当前只覆盖 event participants、entity attributes 和 assertion SPO；还没有从事件内部关系、工具调用、任务状态中构建更丰富的局部图。
 
@@ -167,10 +179,10 @@ edge_clusters:
   当前方案：这些标签先通过统一 `MemoryNode` 承载，暂不新增专用 schema 或强规则构建器。  
   原因：真实 agent 数据中的 tool/task/instruction 形态差异较大，过早固定策略会限制后续适配。
 
-- **检索增强**  
-  设计方向：lexical + vector + hyperedge + edge cluster + temporal + rerank。  
-  当前方案：lexical recall + 简单 HyperEdge expansion + 少量结构化加分。  
-  原因：写入结构还在稳定，先保留可解释检索链路，避免向量和 rerank 问题掩盖写入质量问题。
+- **检索增强**
+  设计方向：lexical + vector + hyperedge + edge cluster + temporal + rerank。
+  当前方案：写入侧先只把三元组拼接为 `subject predicate object` 句子后 embedding 到 Qdrant；检索侧仍为 lexical recall + 简单 HyperEdge expansion + 少量结构化加分。
+  原因：先建立可重建的向量索引层和 payload 结构，再逐步接入 triple/node/hyperedge/cluster 的混合召回策略，避免一开始就把召回质量问题和写入结构问题混在一起。
 
 - **增量构建缓存**  
   设计方向：prefix hash、config hash、prompt hash、append-only/rebuild 判断。  
@@ -204,6 +216,12 @@ edge_clusters:
 - **检索扩展属于 `EdgeExpansion`**
   `Retriever` 不再内联图拓扑扩展逻辑，而是委托 `retrieval.expansion.EdgeExpansion`。后续加入 multi-hop 或 EdgeCluster expansion 时，应扩展 `EdgeExpansion` 或新增 expansion 组件，不要让 `Retriever` 重新膨胀。
 
+- **Qdrant 作为默认向量后端**
+  原设计文档中仍提到 `faiss/chromadb`。当前实现选择 Qdrant local mode：用户无需启动服务，且 payload filter 能自然承载 `namespace/item_type/status/predicate/edge` 等检索条件。后续不要再按旧文档默认回退到 FAISS；FAISS 更适合作为纯 ANN 内核，不适合作为当前图记忆的主向量存储抽象。
+
+- **三元组向量索引先于节点/超边/文本索引**
+  当前只索引三元组，embedding 输入保持为 `subject predicate object` 的自然拼接句子。这与用户当前目标一致，也能先验证 SPO 级语义召回。节点全文、HyperEdge 和 Cluster 的向量化应作为后续策略扩展，不应在本轮强行混入同一个 collection 语义。
+
 - **`default_policy` 只作为内部 fallback，不暴露为 prompt label**  
   这避免 LLM 抽取出 `default_policy` 这种实现名标签。后续扩展 node label prompt 时应保持该行为。
 
@@ -214,6 +232,8 @@ edge_clusters:
 - 默认配置和 split config 加载。
 - `.env` 模型变量解析。
 - embedding `batch_size` 配置和分批调用。
+- 默认向量后端配置为 Qdrant。
+- 三元组向量索引写入时使用 `subject predicate object` 拼接句子作为 embedding 输入。
 - 统一节点 schema 和 SQLite 表结构。
 - 显式 extractor 到系统组装链路。
 - 默认节点标签集合。

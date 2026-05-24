@@ -19,6 +19,7 @@ from c_hypermem.pipeline.node_builder import NodeBuilder, collect_entities
 from c_hypermem.pipeline.extraction import ExtractionContext, LLMMemoryExtractor, _render_node_labels
 from c_hypermem.retrieval.expansion import EdgeExpansion
 from c_hypermem.schema import ExtractedAssertion, ExtractedEntity, MemoryExtraction
+from c_hypermem.stores.vector_store import collect_triple_index_items, triple_embedding_text
 from c_hypermem.utils.prompts import PromptRegistry
 
 
@@ -136,6 +137,9 @@ def test_default_config_includes_split_config_files():
     assert config.edge_clusters.maintenance_prompts.fact_merge == "maintenance/fact_merge.md"
     assert config.edge_clusters.maintenance_prompts.contradiction_check == "maintenance/contradiction_check.md"
     assert config.edge_clusters.background_maintenance.trigger_every_k_writes == 100
+    assert config.index.vector == "qdrant"
+    assert config.index.vector_store.backend == "qdrant"
+    assert config.index.vector_store.collection_name == "c_hypermem_memory"
     assert config.local_graph.configured_by_node_labels
     assert config.node_labels.labels["event"].indexing.time_index
     assert dict_config.llm is not None
@@ -163,6 +167,85 @@ def test_embedding_model_client_batches_requests():
 
     assert fake_client.inputs == [["a", "b"], ["c", "d"], ["e"]]
     assert len(embeddings) == 5
+
+
+def test_memory_indexes_local_triples_as_sentence_strings(tmp_path):
+    embedding_client = RecordingEmbeddingClient()
+    vector_store = RecordingVectorStore()
+    memory = Memory.from_config(
+        {"storage": {"path": str(tmp_path / "memory.sqlite3")}},
+        extractor=StaticExtractor(),
+        embedding_client=embedding_client,
+        vector_store=vector_store,
+    )
+    namespace = "vector_triples_ns"
+    memory.reset(namespace)
+
+    memory.add_memory("Alice prefers morning interviews.", namespace=namespace)
+    nodes = memory.store.list_nodes(namespace)
+    fact_nodes = [node for node in nodes if "fact" in node.node_labels]
+    memory.close()
+
+    expected_texts = [
+        "Alice participated_as speaker",
+        "Alice prefers morning interviews",
+    ]
+    assert fact_nodes
+    assert embedding_client.inputs == [expected_texts]
+    assert len(vector_store.records) == 2
+    record = next(item for item in vector_store.records if item.text == expected_texts[1])
+    assert record.payload["item_type"] == "triple"
+    assert record.payload["namespace"] == namespace
+    assert record.payload["owner_node_id"] == fact_nodes[0].node_id
+    assert record.payload["triple_id"] == fact_nodes[0].local_graph.triples[0].triple_id
+    assert vector_store.deleted_namespaces == [namespace]
+    assert vector_store.closed
+
+
+def test_collect_triple_index_items_skips_unpersisted_triple_ids():
+    builder = NodeBuilder(LocalGraphBuilder())
+    context = AssemblyContext(namespace="skip_ns", metadata={}, current_turn=0)
+    subject = builder.build_or_update_entity_node(
+        ExtractedEntity(name="Alice"),
+        resolution=EntityResolution(aliases={"Alice"}),
+        context=context,
+    )
+    fact = builder.build_fact_node(
+        ExtractedAssertion(subject="Alice", predicate="prefers", object="tea"),
+        subject,
+        context,
+    )
+
+    assert fact.local_graph.triples[0].triple_id is None
+    assert triple_embedding_text(fact.local_graph.triples[0]) == "Alice prefers tea"
+    assert collect_triple_index_items([fact]) == []
+
+
+def test_memory_does_not_create_default_vector_store_without_embedding_config(tmp_path):
+    memory = Memory.from_config({"storage": {"path": str(tmp_path / "memory.sqlite3")}}, extractor=StaticExtractor())
+
+    assert memory.vector_store is None
+    assert memory.embedding_client is None
+
+    memory.close()
+
+
+def test_memory_closes_default_vector_store_when_configured(tmp_path):
+    memory = Memory.from_config(
+        {
+            "storage": {"path": str(tmp_path / "memory.sqlite3")},
+            "embedding": {"model": "embedding-test"},
+            "index": {
+                "vector": "qdrant",
+                "vector_store": {"path": str(tmp_path / "vectors"), "collection_name": "test_collection"},
+            },
+        },
+        extractor=StaticExtractor(),
+    )
+
+    assert memory.vector_store is not None
+
+    memory.close()
 
 
 def test_maintenance_prompt_registry_loads_edge_prompts():
@@ -490,6 +573,32 @@ class MaintenanceLLM:
         if not self.payloads:
             raise AssertionError("Unexpected maintenance LLM call")
         return self.payloads.pop(0)
+
+
+class RecordingEmbeddingClient:
+    def __init__(self):
+        self.inputs = []
+
+    def embed(self, texts):
+        batch = list(texts)
+        self.inputs.append(batch)
+        return [[float(index), 1.0] for index, _ in enumerate(batch)]
+
+
+class RecordingVectorStore:
+    def __init__(self):
+        self.records = []
+        self.deleted_namespaces = []
+        self.closed = False
+
+    def upsert(self, records):
+        self.records.extend(records)
+
+    def delete_namespace(self, namespace):
+        self.deleted_namespaces.append(namespace)
+
+    def close(self):
+        self.closed = True
 
 
 class FakeEmbeddingClient:

@@ -73,8 +73,12 @@ time:
 
 index:
   lexical: sqlite_fts
-  vector: faiss
+  vector: qdrant
   use_embedding: true
+  vector_store:
+    backend: qdrant
+    path: runs/c_hypermem/vector_index
+    collection_name: c_hypermem_memory
 
 retrieval:
   lexical_top_n: 30

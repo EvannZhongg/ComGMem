@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from c_hypermem.config import MemoryConfig
+from c_hypermem.embeddings import EmbeddingClient, EmbeddingModelClient
 from c_hypermem.llms.base import LLMClient
 from c_hypermem.pipeline import IngestionPipeline
 from c_hypermem.pipeline.edge_cluster_builder import EdgeClusterBuilder
@@ -12,6 +13,12 @@ from c_hypermem.pipeline.hyperedge_builder import HyperEdgeBuilder
 from c_hypermem.retrieval import Retriever
 from c_hypermem.schema import AgentInteraction, MemoryImportBatch, Message
 from c_hypermem.stores import SQLiteStore
+from c_hypermem.stores.vector_store import (
+    QdrantVectorStore,
+    VectorRecord,
+    VectorStore,
+    collect_triple_index_items,
+)
 from c_hypermem.utils.time import touch_node_access
 
 
@@ -24,11 +31,22 @@ class Memory:
         hyperedge_builder: HyperEdgeBuilder | None = None,
         edge_cluster_builder: EdgeClusterBuilder | None = None,
         maintenance_llm: LLMClient | None = None,
+        embedding_client: EmbeddingClient | None = None,
+        vector_store: VectorStore | None = None,
     ) -> None:
         self.config = config
         self.store = SQLiteStore(Path(config.storage.path))
         if extractor is None and config.llm is not None:
             extractor = LLMMemoryExtractor(config)
+        self.embedding_client = embedding_client
+        if self.embedding_client is None and config.index.use_embedding and config.embedding is not None:
+            self.embedding_client = EmbeddingModelClient(config.embedding)
+        self.vector_store = vector_store
+        if self.vector_store is None and self.embedding_client is not None and config.index.vector == "qdrant":
+            self.vector_store = QdrantVectorStore(
+                path=config.index.vector_store.path,
+                collection_name=config.index.vector_store.collection_name,
+            )
         self.ingestion = IngestionPipeline(
             config,
             self.store,
@@ -49,6 +67,8 @@ class Memory:
         hyperedge_builder: HyperEdgeBuilder | None = None,
         edge_cluster_builder: EdgeClusterBuilder | None = None,
         maintenance_llm: LLMClient | None = None,
+        embedding_client: EmbeddingClient | None = None,
+        vector_store: VectorStore | None = None,
     ) -> "Memory":
         return cls(
             MemoryConfig.load(config),
@@ -56,10 +76,14 @@ class Memory:
             hyperedge_builder=hyperedge_builder,
             edge_cluster_builder=edge_cluster_builder,
             maintenance_llm=maintenance_llm,
+            embedding_client=embedding_client,
+            vector_store=vector_store,
         )
 
     def reset(self, namespace: str = "default") -> None:
         self.store.reset_namespace(namespace)
+        if self.vector_store is not None:
+            self.vector_store.delete_namespace(namespace)
         self._turn_counters[namespace] = 0
 
     def add_memory(
@@ -125,6 +149,8 @@ class Memory:
         return stats
 
     def close(self) -> None:
+        if self.vector_store is not None:
+            self.vector_store.close()
         self.store.close()
 
     def _next_turn(self, namespace: str, increment: int) -> int:
@@ -141,11 +167,34 @@ class Memory:
 
     def _persist_output(self, output: Any) -> None:
         self.store.upsert_nodes(output.nodes)
+        self._index_triples(output.nodes)
         self.store.upsert_edges(output.edges)
         self.store.upsert_edge_clusters(output.edge_clusters)
         self.store.upsert_edge_cluster_members(output.edge_cluster_members)
         self.store.upsert_entity_aliases(output.entity_aliases)
         self.store.upsert_fact_properties(output.fact_properties)
+
+    def _index_triples(self, nodes: list[Any]) -> None:
+        if self.vector_store is None or self.embedding_client is None:
+            return
+        items = [
+            item
+            for item in collect_triple_index_items(nodes)
+            if item.payload.get("owner_node_status") == "active" and item.payload.get("status") == "active"
+        ]
+        if not items:
+            return
+        embeddings = self.embedding_client.embed([item.text for item in items])
+        records = [
+            VectorRecord(
+                id=item.id,
+                vector=vector,
+                text=item.text,
+                payload=item.payload,
+            )
+            for item, vector in zip(items, embeddings)
+        ]
+        self.vector_store.upsert(records)
 
 
 def _message_or_none(value: str | dict[str, Any] | None, *, default_role: str) -> dict[str, Any] | None:

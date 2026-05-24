@@ -14,6 +14,12 @@ class StorageConfig(BaseModel):
     path: str = "runs/c_hypermem/memory.sqlite3"
 
 
+class VectorStoreConfig(BaseModel):
+    backend: str = "qdrant"
+    path: str = "runs/c_hypermem/vector_index"
+    collection_name: str = "c_hypermem_memory"
+
+
 class ModelConfig(BaseModel):
     provider: str = "openai_compatible"
     model: str
@@ -152,8 +158,9 @@ class TimeConfig(BaseModel):
 
 class IndexConfig(BaseModel):
     lexical: str = "sqlite_fts"
-    vector: str = "faiss"
+    vector: str = "qdrant"
     use_embedding: bool = True
+    vector_store: VectorStoreConfig = Field(default_factory=VectorStoreConfig)
 
 
 class RetrievalConfig(BaseModel):

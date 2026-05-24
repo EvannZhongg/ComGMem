@@ -17,7 +17,7 @@ dependencies = [
 dev = ["pytest>=8", "ruff>=0.5"]
 llms = ["openai>=1.0"]
 embeddings = ["openai>=1.0"]
-vector = ["numpy>=1.24"]
+vector = ["qdrant-client>=1.9"]
 eval = []
 
 [tool.hatch.build.targets.wheel]
