@@ -45,8 +45,6 @@ hyperedges:
 
 edge_clusters:
   enabled: true
-  create_from_related_hyperedges: true
-  allow_conflict_clusters: true
   description_variants_limit: 8
 
 maintenance:
@@ -63,10 +61,6 @@ maintenance:
     compact_after_k_sources: 10
     max_tokens: 2048
     prompt: maintenance/hyper_edge_description_compaction.md
-  edge_cluster:
-    background:
-      enabled: false
-      trigger_every_k_writes: 100
 
 local_graph:
   enabled: true

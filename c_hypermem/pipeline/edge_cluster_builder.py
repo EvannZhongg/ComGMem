@@ -4,7 +4,7 @@ from typing import Any, Protocol
 
 from c_hypermem.config import MemoryConfig
 from c_hypermem.pipeline.context import AssemblyContext
-from c_hypermem.pipeline.graph_utils import source_metadata
+from c_hypermem.pipeline.graph_utils import deep_merge_dict, source_metadata
 from c_hypermem.schema import EdgeCluster, EdgeClusterMember, EdgeDescriptionVariant, HyperEdge
 from c_hypermem.stores.base import MemoryStore
 from c_hypermem.utils.ids import make_cluster_id, make_fingerprint
@@ -25,7 +25,7 @@ class EdgeClusterBuilder(Protocol):
 
 
 class BasicEdgeClusterBuilder:
-    """Attach concrete HyperEdges to stable topic clusters."""
+    """Attach concrete HyperEdges to shared-node clusters."""
 
     def __init__(self, config: MemoryConfig, store: MemoryStore | None = None) -> None:
         self.config = config
@@ -40,77 +40,105 @@ class BasicEdgeClusterBuilder:
         current_turn: int,
     ) -> tuple[list[EdgeCluster], list[EdgeClusterMember]]:
         context = AssemblyContext(namespace=namespace, metadata=metadata, current_turn=current_turn)
-        clusters_by_fingerprint: dict[str, EdgeCluster] = {}
-        new_clusters_by_id: dict[str, EdgeCluster] = {}
-        members: list[EdgeClusterMember] = []
+        edges_by_shared_node: dict[str, dict[str, HyperEdge]] = {}
         for edge in edges:
-            cluster, member, created = self._build_for_edge(edge, context, clusters_by_fingerprint)
-            if created:
-                new_clusters_by_id[cluster.cluster_id] = cluster
+            for node_id in edge.node_ids:
+                edges_by_shared_node.setdefault(node_id, {})[edge.edge_id] = edge
+        if self.store is not None:
+            incident_edges = self.store.get_incident_edges(namespace, sorted(edges_by_shared_node))
+            for edge in incident_edges:
+                for node_id in edge.node_ids:
+                    if node_id in edges_by_shared_node:
+                        edges_by_shared_node[node_id][edge.edge_id] = edge
+
+        clusters_by_fingerprint: dict[str, EdgeCluster] = {}
+        changed_clusters_by_id: dict[str, EdgeCluster] = {}
+        members_by_key: dict[tuple[str, str], EdgeClusterMember] = {}
+        for shared_node_id in sorted(edges_by_shared_node):
+            related_edges = edges_by_shared_node[shared_node_id]
+            if len(related_edges) < 2:
+                continue
+            cluster, created_or_changed = self._get_or_create_shared_node_cluster(
+                shared_node_id,
+                sorted(related_edges.values(), key=lambda item: item.edge_id),
+                context,
+                clusters_by_fingerprint,
+            )
+            if created_or_changed:
+                changed_clusters_by_id[cluster.cluster_id] = cluster
             clusters_by_fingerprint[cluster.cluster_fingerprint] = cluster
-            members.append(member)
-        return list(new_clusters_by_id.values()), members
+            for edge_id in sorted(related_edges):
+                members_by_key[(cluster.cluster_id, edge_id)] = EdgeClusterMember(
+                    namespace=context.namespace,
+                    cluster_id=cluster.cluster_id,
+                    edge_id=edge_id,
+                    relation_to_cluster="shared_node",
+                )
+        members = list(members_by_key.values())
+        return list(changed_clusters_by_id.values()), members
 
     def build_for_edge(self, edge: HyperEdge, context: AssemblyContext) -> tuple[EdgeCluster, EdgeClusterMember]:
-        cluster, member, _ = self._build_for_edge(edge, context, {})
-        return cluster, member
-
-    def _build_for_edge(
-        self,
-        edge: HyperEdge,
-        context: AssemblyContext,
-        batch_clusters: dict[str, EdgeCluster],
-    ) -> tuple[EdgeCluster, EdgeClusterMember, bool]:
-        label = edge_cluster_label(edge)
-        cluster_description = cluster_description_for_edge(edge)
-        cluster_fingerprint = cluster_fingerprint_for_edge(edge, label, cluster_description)
-        cluster, created = self._get_or_create_cluster(
-            edge,
-            context,
-            label,
-            cluster_description,
-            cluster_fingerprint,
-            batch_clusters,
-        )
+        cluster, _ = self._get_or_create_shared_node_cluster(edge.node_ids[0], [edge], context, {})
         member = EdgeClusterMember(
             namespace=context.namespace,
             cluster_id=cluster.cluster_id,
             edge_id=edge.edge_id,
-            relation_to_cluster=str(edge.metadata.get("relation_to_cluster") or "supports"),
+            relation_to_cluster="shared_node",
         )
-        return cluster, member, created
+        return cluster, member
 
-    def _get_or_create_cluster(
+    def _get_or_create_shared_node_cluster(
         self,
-        edge: HyperEdge,
+        shared_node_id: str,
+        related_edges: list[HyperEdge],
         context: AssemblyContext,
-        label: str,
-        cluster_description: str,
-        cluster_fingerprint: str,
         batch_clusters: dict[str, EdgeCluster],
     ) -> tuple[EdgeCluster, bool]:
-        batch_cluster = batch_clusters.get(cluster_fingerprint)
-        if batch_cluster is not None:
-            self._append_description_variant(batch_cluster, edge)
-            return batch_cluster, False
-        if self.store is not None:
-            existing = self.store.find_edge_cluster_by_fingerprint(context.namespace, cluster_fingerprint)
-            if existing is not None:
-                existing.canonical_description = cluster_description
-                self._append_description_variant(existing, edge)
-                return existing, True
-        cluster = EdgeCluster(
-            cluster_id=make_cluster_id(context.namespace, cluster_fingerprint),
-            namespace=context.namespace,
-            cluster_fingerprint=cluster_fingerprint,
-            canonical_description=cluster_description,
-            cluster_labels=[label],
-            aliases=[compact_key(cluster_description)] if compact_key(cluster_description) else [],
-            conflict_state=str(edge.metadata.get("conflict_state") or "none"),  # type: ignore[arg-type]
-            description_variants=[EdgeDescriptionVariant(text=edge.description, source_edge_id=edge.edge_id)],
-            metadata=source_metadata(context, source_ref=None),
-        )
-        return cluster, True
+        label = "shared_node"
+        cluster_fingerprint = cluster_fingerprint_for_shared_node(shared_node_id)
+        cluster_description = f"HyperEdges sharing node: {shared_node_id}"
+        cluster = batch_clusters.get(cluster_fingerprint)
+        if cluster is None and self.store is not None:
+            cluster = self.store.find_edge_cluster_by_fingerprint(context.namespace, cluster_fingerprint)
+        created_or_changed = False
+        if cluster is None:
+            cluster = EdgeCluster(
+                cluster_id=make_cluster_id(context.namespace, cluster_fingerprint),
+                namespace=context.namespace,
+                cluster_fingerprint=cluster_fingerprint,
+                canonical_description=cluster_description,
+                cluster_labels=[label],
+                aliases=[compact_key(shared_node_id)],
+                conflict_state="none",
+                description_variants=[],
+                metadata=source_metadata(
+                    context,
+                    source_ref=None,
+                    extra={"shared_node_ids": [shared_node_id]},
+                ),
+            )
+            created_or_changed = True
+        else:
+            cluster.canonical_description = cluster_description
+            cluster.cluster_labels = list(dict.fromkeys([*cluster.cluster_labels, label]))
+            cluster.metadata = deep_merge_dict(
+                cluster.metadata,
+                source_metadata(
+                    context,
+                    source_ref=None,
+                    extra={"shared_node_ids": [shared_node_id]},
+                ),
+            )
+            shared_node_ids = list(cluster.metadata.get("shared_node_ids") or [])
+            if shared_node_id not in shared_node_ids:
+                shared_node_ids.append(shared_node_id)
+                cluster.metadata["shared_node_ids"] = shared_node_ids
+                created_or_changed = True
+        before = [(variant.text, variant.source_edge_id) for variant in cluster.description_variants]
+        for edge in related_edges:
+            self._append_description_variant(cluster, edge)
+        after = [(variant.text, variant.source_edge_id) for variant in cluster.description_variants]
+        return cluster, created_or_changed or before != after
 
     def _append_description_variant(self, cluster: EdgeCluster, edge: HyperEdge) -> None:
         text = edge.description.strip()
@@ -128,26 +156,5 @@ class BasicEdgeClusterBuilder:
         cluster.description_variants = cluster.description_variants[:limit]
 
 
-def cluster_fingerprint_for_edge(edge: HyperEdge, label: str, cluster_description: str) -> str:
-    hint = edge.metadata.get("cluster_hint")
-    if isinstance(hint, dict) and hint:
-        return make_fingerprint(
-            str(hint.get("kind") or label),
-            {
-                "cluster_label": label,
-                "subject_node_id": hint.get("subject_node_id"),
-                "predicate": hint.get("predicate"),
-            },
-        )
-    return make_fingerprint(edge.edge_id, {"cluster_label": label})
-
-
-def edge_cluster_label(edge: HyperEdge) -> str:
-    label = edge.metadata.get("cluster_label")
-    if isinstance(label, str) and label.strip():
-        return compact_key(label)
-    return "memory_context"
-
-
-def cluster_description_for_edge(edge: HyperEdge) -> str:
-    return edge.description
+def cluster_fingerprint_for_shared_node(shared_node_id: str) -> str:
+    return make_fingerprint("shared_node", {"shared_node_id": shared_node_id})

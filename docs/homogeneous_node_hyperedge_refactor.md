@@ -152,11 +152,10 @@ ExtractedEdgeSummary + member nodes -> HyperEdge(description, node_ids)
 - 删除默认写死的：
   - `event -> facts evidence edge`
   - `subject entity + fact state edge`
-- EdgeClusterBuilder 不再依赖 `edge.edge_type == state/correction`。应改为基于：
-  - edge description
-  - member node labels
-  - source scope
-  - optional inferred metadata
+- EdgeClusterBuilder 不再依赖 `edge.edge_type == state/correction`，也不再按 description 相似度、topic hint 或后台 merge 维护 cluster。当前概念应收敛为共享节点聚合：
+  - 两条 HyperEdge 只要共享至少一个 `member_node_id`，就属于同一 EdgeCluster 视图。
+  - EdgeCluster 不合并 HyperEdge，也不判断支持、更新、冲突关系。
+  - EdgeCluster 的来源应来自成员 edge 的系统 metadata，而不是 LLM 输出的关系字段。
 
 ### 3.5 维护逻辑
 
@@ -167,7 +166,6 @@ ExtractedEdgeSummary + member nodes -> HyperEdge(description, node_ids)
 - `c_hypermem/prompts/maintenance/contradiction_check.md`
 - `c_hypermem/prompts/maintenance/edge_merge.md`
 - `c_hypermem/prompts/maintenance/edge_conflict_check.md`
-- `c_hypermem/prompts/maintenance/edge_cluster_merge.md`
 
 需要调整：
 
@@ -187,6 +185,7 @@ ExtractedEdgeSummary + member nodes -> HyperEdge(description, node_ids)
 ```
 
 - `edge_merge.md` 不再要求 relation/roles/polarity；改为 description、members、source/time、inferred metadata 只作为辅助信号。
+- 当前不再保留 EdgeCluster 维护 prompt；EdgeCluster 先作为共享节点形成的轻量聚合视图。
 
 ### 3.6 存储与迁移
 
@@ -351,6 +350,7 @@ ExtractedEdgeSummary + member nodes -> HyperEdge(description, node_ids)
 - 已完成：移除旧 fact/property/typed-edge 维护 prompt 资源和 registry 入口，新增 `maintenance/node_summary_compaction.md` 与 `maintenance/local_triple_merge.md`。
 - 已完成：Node summary 维护第一阶段。同一 node 的不同来源 summary 在低于 `k` 时拼接；达到 `maintenance.node_summary.compact_after_k_sources` 或 token 上限时强触发 LLM 压缩；无维护 LLM 时显式失败。
 - 已完成：LocalTriple 维护第一阶段。同一 node 内先匹配 normalized S；S/P/O 完全相同只合并系统来源 provenance，不触发 LLM；S/P 相同且 O 不同才触发 LLM 路由，支持 keep_existing、keep_new、keep_both、merge、needs_review；无维护 LLM 时显式失败。
+- 已完成：移除当前 EdgeCluster 维护配置入口；EdgeCluster 概念改为共享 `member_node_id` 的 HyperEdge 聚合视图，不包含相似度召回、cluster merge、冲突健康检查或后台维护。
 - 未开始：memory node merge/conflict、description-only edge maintenance、旧测试迁移、示例迁移。
 
 下一步建议继续 **阶段 6：维护逻辑泛化**，补齐统一 MemoryNode merge/conflict 与 description-only HyperEdge 维护。

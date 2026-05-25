@@ -48,6 +48,8 @@ def test_default_config_uses_global_token_counting_config():
     assert models_raw["token_counting"]["tokenizer_encoding"] == "cl100k_base"
     assert "tokenizer_encoding" not in default_raw["maintenance"]["node_summary"]
     assert "tokenizer_encoding" not in default_raw["maintenance"]["hyper_edge_description"]
+    assert "edge_cluster" not in default_raw["maintenance"]
+    assert not hasattr(config.maintenance, "edge_cluster")
 
 
 def test_ingestion_builds_nodes_and_description_only_hyperedges(tmp_path):
@@ -81,7 +83,7 @@ def test_ingestion_builds_nodes_and_description_only_hyperedges(tmp_path):
     assert all("edge_summary_refs" in edge.metadata for edge in edges)
     assert all(edge.node_ids for edge in edges)
     assert stats["entity_aliases"] >= 1
-    assert clusters
+    assert len(clusters) == 1
     assert results
     assert "Alice prefers morning interviews" in results[0]["content"]
     assert "edge_type" not in results[0]["metadata"]
@@ -89,6 +91,34 @@ def test_ingestion_builds_nodes_and_description_only_hyperedges(tmp_path):
     assert "edge_roles" not in results[0]["metadata"]
     assert all(node.time.world.event_time for node in nodes)
     assert all(node.time.world.source_timestamp for node in nodes)
+
+
+def test_edge_cluster_groups_edges_with_shared_member_node(tmp_path):
+    memory = Memory.from_config(
+        {"storage": {"path": str(tmp_path / "memory.sqlite3")}},
+        extractor=StaticHomogeneousExtractor(),
+    )
+    namespace = "shared_node_cluster_ns"
+    memory.reset(namespace)
+
+    memory.add_memory("Alice prefers morning interviews.", namespace=namespace)
+    edges = memory.store.list_edges(namespace)
+    clusters = memory.store.list_edge_clusters(namespace)
+    members = memory.store.list_edge_cluster_members(namespace)
+    memory.close()
+
+    assert len(edges) == 2
+    assert len(clusters) == 1
+    cluster = clusters[0]
+    shared_node_ids = cluster.metadata["shared_node_ids"]
+    assert len(shared_node_ids) == 1
+    shared_node_id = shared_node_ids[0]
+    assert all(shared_node_id in edge.node_ids for edge in edges)
+    assert cluster.cluster_labels == ["shared_node"]
+    assert cluster.conflict_state == "none"
+    assert cluster.canonical_description == f"HyperEdges sharing node: {shared_node_id}"
+    assert {member.edge_id for member in members} == {edge.edge_id for edge in edges}
+    assert {member.relation_to_cluster for member in members} == {"shared_node"}
 
 
 def test_entity_label_nodes_reuse_existing_alias_entry(tmp_path):
@@ -693,7 +723,6 @@ def test_hyperedge_maintenance_reuses_same_member_set_and_reindexes_description(
     memory.add_memory("I am Alice.", namespace=namespace)
     memory.add_memory("I am preparing for interviews.", namespace=namespace)
     edges = memory.store.list_edges(namespace)
-    clusters = memory.store.list_edge_clusters(namespace)
     memory.close()
 
     assert len(edges) == 1
@@ -704,8 +733,6 @@ def test_hyperedge_maintenance_reuses_same_member_set_and_reindexes_description(
     state = edge.metadata["maintenance"]["hyper_edge_description"]
     assert state["description_source_turn_ids"] == ["turn:0", "turn:1"]
     assert state["pending_source_turn_ids"] == ["turn:0", "turn:1"]
-    assert len(clusters) == 1
-    assert clusters[0].canonical_description == edge.description
     edge_records = [
         record for record in vector_store.records if record.payload["item_type"] == "hyper_edge_description"
     ]

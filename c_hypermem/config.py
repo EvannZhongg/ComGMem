@@ -126,11 +126,6 @@ class HyperEdgesConfig(BaseModel):
     resolution: HyperEdgeResolutionConfig = Field(default_factory=HyperEdgeResolutionConfig)
 
 
-class BackgroundClusterMaintenanceConfig(BaseModel):
-    enabled: bool = False
-    trigger_every_k_writes: int = 100
-
-
 class NodeSummaryMaintenanceConfig(BaseModel):
     enabled: bool = True
     compact_after_k_sources: int = Field(default=10, ge=1)
@@ -150,23 +145,16 @@ class HyperEdgeDescriptionMaintenanceConfig(BaseModel):
     prompt: str = "maintenance/hyper_edge_description_compaction.md"
 
 
-class EdgeClusterMaintenanceConfig(BaseModel):
-    background: BackgroundClusterMaintenanceConfig = Field(default_factory=BackgroundClusterMaintenanceConfig)
-
-
 class MaintenanceConfig(BaseModel):
     node_summary: NodeSummaryMaintenanceConfig = Field(default_factory=NodeSummaryMaintenanceConfig)
     local_triples: LocalTripleMaintenanceConfig = Field(default_factory=LocalTripleMaintenanceConfig)
     hyper_edge_description: HyperEdgeDescriptionMaintenanceConfig = Field(
         default_factory=HyperEdgeDescriptionMaintenanceConfig
     )
-    edge_cluster: EdgeClusterMaintenanceConfig = Field(default_factory=EdgeClusterMaintenanceConfig)
 
 
 class EdgeClustersConfig(BaseModel):
     enabled: bool = True
-    create_from_related_hyperedges: bool = True
-    allow_conflict_clusters: bool = True
     description_variants_limit: int = 8
 
 

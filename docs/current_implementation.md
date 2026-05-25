@@ -21,7 +21,7 @@
 - `embedding.batch_size` 已加入配置，默认值为 `10`。
 - `ingestion.context_window_messages` 控制传给抽取模型的最近上下文消息数，默认值为 `3`。
 - `index.vector` 默认改为 `qdrant`；`index.vector_store` 提供本地 Qdrant 路径和 collection 名称，默认无需用户额外配置服务端。
-- `maintenance` 已从 `edge_clusters` 中独立为顶层配置；当前包含 `node_summary.*`、`local_triples.*` 和 `edge_cluster.background`。
+- `maintenance` 是顶层配置；当前只包含 `node_summary.*`、`local_triples.*` 和 `hyper_edge_description.*`，不再包含 EdgeCluster 维护入口。
 - 当前默认节点标签包括：`event/fact/entity/state/preference/task/instruction/tool`。
 - `turn` 不是 `MemoryNode` 标签；它是独立的原始对话记录配置，写入 `turns` 表和 `turn_dialogue` 向量索引，不需要 `LocalNodeGraph`。
 - `node_labels.unconfigured_label_policy` 是未配置标签的处理规则；传入 prompt 时只以规则文本出现，不作为可抽取 label 名称暴露给 LLM。
@@ -32,7 +32,7 @@
 
 - `MemoryNode`：统一节点结构，使用 `node_labels` 表达语义类型。
 - `HyperEdge`：具体高阶关系实例，核心字段已收敛到 description、member node ids、metadata、time/status/member policy 等；`edge_type/relation/polarity/roles` 已不再是 Pydantic schema 核心字段。
-- `EdgeCluster`：相关 HyperEdge 的聚合工作集，不强制合并边。
+- `EdgeCluster`：共享成员节点的 HyperEdge 聚合视图，不强制合并边，不做相似度聚类或后台维护。
 - `LocalNodeGraph`：所有节点共享的局部图结构，只包含统一 triples；旧 `attributes/roles` 已从 schema 移除。
 - `ExtractedNode`：新的抽取节点候选，包含 `ref/labels/canonical_text/summaries/triples/edge_summary_refs/metadata`。节点构建时间由系统写入，不由 LLM 输出。
 - `ExtractedEdgeSummary`：新的抽取边摘要候选，包含 `ref/description/metadata`。
@@ -74,7 +74,7 @@ Memory.add_memory/add
   - 编排 `LocalGraphBuilder` 规范化和去重 `ExtractedNode.triples`。
   - 根据 `node.edge_summary_refs` 反向收集 HyperEdge 成员。
   - 编排 `BasicHyperEdgeBuilder.build_from_summary()` 构建 description-only HyperEdge。
-  - 编排 `BasicEdgeClusterBuilder` 按 edge description / optional metadata 复用或创建 EdgeCluster，并追加 cluster members。
+  - 编排 `BasicEdgeClusterBuilder` 为共享成员节点的 HyperEdge 建立 EdgeCluster 关系，并追加 cluster members。
   - 编排 `GraphMaintenance.merge_node()` 对同一 node 的跨来源 summary 和 node 内 triples 做维护。
   - 对带 `entity` label 的节点写入 entity alias index；新主路径不再写入 fact property index。
 
@@ -114,10 +114,11 @@ maintenance:
   local_triples:
     enabled: true
     prompt: maintenance/local_triple_merge.md
-  edge_cluster:
-    background:
-      enabled: false
-      trigger_every_k_writes: 100
+  hyper_edge_description:
+    enabled: true
+    compact_after_k_sources: 10
+    max_tokens: 2048
+    prompt: maintenance/hyper_edge_description_compaction.md
 ```
 
 ## 6. 存储
@@ -261,10 +262,10 @@ SearchResult 当前结构要点：
 
 当前实现仍低于设计文档的部分：
 
-- Node summary 与 LocalTriple 维护已接入同构节点合并路径；更完整的 memory node merge/update/conflict、description-only edge 维护和 EdgeCluster health/merge 仍待实现。
+- Node summary、LocalTriple 与 description-only HyperEdge description 维护已接入同构节点/边合并路径；更完整的 memory node merge/update/conflict 仍待实现。
 - `state/task/instruction/tool` 已作为标签配置存在，但尚未都有专门构建策略；当前主要依靠 LLM 输出 labels 和统一节点结构承载。`turn` 已从节点标签配置中独立出来，只作为对话记录和来源追踪配置。
 - 检索主流程已接入 node_content、node_summary、node-local-graph 三路向量召回，但尚未接入 EdgeCluster canonical / variant 向量召回，也未接入 turn_dialogue 向量召回。
-- EdgeCluster 已按 topic fingerprint 查库复用并追加新边；检索侧已能在命中 edge 所属 cluster 时带出 `description_variants` 和 sibling edge nodes，但尚未实现相似 cluster 向量召回、LLM cluster merge、后台宏观整理和复杂冲突状态维护。
+- EdgeCluster 保留为共享成员节点形成的聚合视图；检索侧已能在命中 edge 所属 cluster 时带出 `description_variants` 和 sibling edge nodes。当前不做相似 cluster 向量召回、LLM cluster merge、后台宏观整理或复杂冲突状态维护。
 - LocalNodeGraph 当前只覆盖 event participants、entity attributes 和 assertion SPO；还没有从事件内部关系、工具调用、任务状态中构建更丰富的局部图。
 
 ## 9. 设计仍不明确时的轻量替代方案
@@ -286,10 +287,10 @@ SearchResult 当前结构要点：
   当前方案：基础边保守新建，只按确定性 fingerprint 去重；成员重叠不触发合并。
   原因：成员相近的边可能表达支持、修正或冲突关系，直接合并会污染语义。后续 edge merge 必须先完成冲突感知和 description-only edge 兼容判断。
 
-- **EdgeCluster 整理**  
-  设计方向：相关 HyperEdge 进入同一 cluster，并支持后台 cluster merge。  
-  当前方案：`BasicEdgeClusterBuilder` 先按 edge metadata 中的 topic hint 生成 `cluster_fingerprint`，查库复用已有 cluster；没有命中时才新建 cluster，后台整理仍只保留配置开关。
-  原因：cluster 相似度阈值、冲突 cluster 的状态机、description variants 的压缩策略都还没有稳定标准。
+- **EdgeCluster 聚合**  
+  设计方向：共享 `member_node_id` 的 HyperEdges 进入同一 EdgeCluster 视图，用于检索时带出 sibling edges。  
+  当前方案：不保留 EdgeCluster 维护配置，不做相似度召回、LLM cluster merge、冲突健康检查或后台整理。
+  原因：EdgeCluster 先承担轻量组织视图；语义合并和冲突判断应留在具体 HyperEdge / MemoryNode 维护链路里。
 
 - **LocalNodeGraph 丰富度**
   设计方向：节点内部保存三元组、qualifiers 和局部状态。
@@ -335,7 +336,7 @@ SearchResult 当前结构要点：
   当前不再接受 `entities/events/assertions/sources` 主抽取 shape，也不建立 fact property index。后续即使扩展 extraction schema，也应避免同一事实在多个字段重复入库。
 
 - **EdgeCluster 不是 HyperEdge merge 的前置条件**  
-  当前实现允许先创建具体 HyperEdge，再用 cluster 轻量聚合。后续相似边召回、cluster merge 都应维持“不强制合并具体边”的原则。
+  当前实现允许先创建具体 HyperEdge，再用共享节点 cluster 轻量聚合。EdgeCluster 不触发具体边合并，也不承担 cluster merge 维护。
 
 - **检索扩展属于独立 retrieval 组件**
   `Retriever` 只负责编排，不直接写具体召回算法。当前拆分为 `SQLiteFTSRecall`、`DenseVectorRecall`、`reciprocal_rank_fusion` 和 `GraphRippleExpansion`。旧的 `EdgeExpansion` 仍保留为历史简单拓扑扩展模块，但当前主检索链路不再使用它。
@@ -378,7 +379,7 @@ SearchResult 当前结构要点：
 - 维护 prompt registry 加载 `maintenance.node_summary_compaction` 和 `maintenance.local_triple_merge`。
 - LLM contradiction check 驱动的冲突 fact 退役与 correction edge。
 - `loves/travels_to` 等多值语义由维护 LLM 判为 compatible 时不会被错误退役。
-- EdgeCluster 按 topic fingerprint 复用，多个相关 state edge 会追加到同一 cluster。
+- EdgeCluster 作为共享成员节点的 HyperEdge 聚合视图，多个 sibling edges 会追加到同一 cluster。
 - SQLite FTS 召回通过 `nodes_fts` 检索 `content/summary/local_graph`。
 - node_content、node_summary、node-local-graph 三路向量召回接入检索主流程。
 - RRF 融合 lexical 和 vector 初始结果。

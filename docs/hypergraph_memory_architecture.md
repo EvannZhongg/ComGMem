@@ -228,7 +228,7 @@ triple_id = hash(namespace + owner_node_id + normalized_spo + qualifiers)
 - 同一节点可以挂到多个超边。
 - 超边可以保存系统生成的成员上下文，但不要求 LLM 输出 `roles`。第一版应优先用 `description` 和成员集合表达关系，避免在节点内部再维护一套角色字段。
 - LLM 不需要输出 `edge_type` 或 `relation`。如果检索、维护或分析需要类型化策略，系统可以后处理推断 `metadata.inferred_edge_type` / `metadata.inferred_relation`，这些字段是可选解释和策略缓存，不是超边成立的前提。
-- `edge_id` 由系统生成的 `edge_fingerprint` 生成；成员集合变化不改变 `edge_id`。
+- `edge_id` 由系统根据 namespace 和排序后的成员节点集合生成；同一组成员节点在同一 namespace 下对应同一条具体 HyperEdge。
 - `member_policy` 可以是 `immutable`、`appendable` 或 `versioned`，只控制成员更新方式，不控制 ID 生成方式。
 
 ### 4.1 保守超边与 EdgeCluster
@@ -248,35 +248,32 @@ EdgeCluster
   多条相关 HyperEdge 的聚合对象
 ```
 
-`HyperEdge` 保留具体证据、成员、边描述、时间和状态；`EdgeCluster` 负责把相关边组织到一起，允许同簇内存在支持、补充、更新或冲突关系。
+`HyperEdge` 保留具体证据、成员、边描述、时间和状态；`EdgeCluster` 只负责把共享成员节点的边组织到一起。只要两条 HyperEdge 共享至少一个 `member_node_id`，它们就可以被视为同一个 EdgeCluster 的成员。EdgeCluster 不承担 HyperEdge merge、相似度聚类、冲突判断或后台维护职责。
 
 示例：
 
 ```python
 {
     "cluster_id": "cluster:...",
-    "canonical_description": "Toby's species and pet status.",
-    "cluster_labels": ["entity_state", "pet_profile"],
-    "conflict_state": "contains_conflict",
+    "canonical_description": "HyperEdges sharing node: Toby.",
+    "cluster_labels": ["shared_node"],
+    "shared_node_ids": ["node:toby"],
     "edge_ids": ["edge:001", "edge:002"],
-    "edge_relations": {
-        "edge:001": "supports",
-        "edge:002": "contradicts"
-    }
+    "description_variants": ["Toby is a dog.", "Toby is the user's pet."]
 }
 ```
 
-这里的 `edge_relations` 是系统在 EdgeCluster 内部维护的边间关系，例如支持、补充、更新或冲突；它不是 LLM 在写入抽取阶段输出的 HyperEdge `relation` 字段。
+这里的 `shared_node_ids` 表示 cluster 成立的确定性依据。它不是从 description 相似度推断出的主题，也不是 LLM 在写入抽取阶段输出的关系判断。
 
 ### 4.2 统一超边 ID 策略
 
-`edge_id` 仍然应保持稳定，但不建议由动态主题名直接决定，也不建议由成员集合直接决定。推荐使用保守的 `edge_fingerprint`：
+`edge_id` 应保持稳定，不由动态主题名、description 或来源 turn 决定。当前推荐使用成员集合的确定性 fingerprint：
 
 ```text
-edge_id = hash(namespace + edge_fingerprint)
+edge_id = hash(namespace + sorted(member_node_ids))
 ```
 
-`edge_fingerprint` 可以由 normalized description、members、source hint、time hint 等生成，但合并必须保守。成员集合只用于签名和版本：
+同一组成员节点再次被抽取为 HyperEdge 时，复用同一 `edge_id` 并合并 description/source metadata。成员集合变化代表另一条具体 HyperEdge：
 
 ```text
 member_signature = hash(sorted(member_node_ids))
@@ -648,8 +645,8 @@ Memory = MemoryNodes + HyperEdges + EdgeClusters + LocalNodeGraphs
 其中：
 
 - `MemoryNodes` 是长期记忆的共享节点池，具体语义标签由配置中的 `node_labels` 决定。
-- `HyperEdges` 是具体高阶关系实例，保守维护，不轻易合并。
-- `EdgeClusters` 是相关超边的聚合对象，用来承接主题漂移、近似重复、更新和冲突。
+- `HyperEdges` 是具体高阶关系实例；相同成员集合复用同一 edge，不因描述相似或局部成员重叠直接合并。
+- `EdgeClusters` 是共享成员节点的 HyperEdge 聚合视图，用来在检索和上下文组织时带出 sibling edges，不承担相似度聚类、冲突判断或后台维护。
 - `LocalNodeGraphs` 是复合节点内部挂载的统一三元组集合或小型知识图谱。
 
 外层结构表达“这些记忆为什么应该被一起看”；内层结构表达“这个节点自身到底包含哪些语义”。
