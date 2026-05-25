@@ -304,6 +304,11 @@ def test_local_triple_maintenance_keep_new_retires_existing_triple_and_reindexes
         ("California", "retired"),
         ("San Francisco", "active"),
     ]
+    assert triples[0].superseded_by == triples[1].triple_id
+    assert triples[0].qualifiers["source_turn_ids"] == ["turn:0"]
+    assert triples[1].qualifiers["source_turn_ids"] == ["turn:1"]
+    assert triples[1].qualifiers["maintenance_replaced_triple_ids"] == [triples[0].triple_id]
+    assert triples[1].qualifiers["maintenance_replaced_source_turn_ids"] == ["turn:0"]
     graph_records = [
         record
         for record in vector_store.records
@@ -336,7 +341,7 @@ def test_local_triple_maintenance_keep_existing_reindexes_active_graph_without_i
                 ),
                 _single_entity_payload(
                     "Alice still likes tea.",
-                    triples=[{"subject": "Alice", "predicate": "likes", "object": "tea"}],
+                    triples=[{"subject": "Alice", "predicate": "likes", "object": "tea ceremony"}],
                 ),
             ]
         ),
@@ -354,6 +359,12 @@ def test_local_triple_maintenance_keep_existing_reindexes_active_graph_without_i
 
     assert maintenance_llm.call_count == 1
     assert [(triple.object, triple.status) for triple in node.local_graph.triples] == [("tea", "active")]
+    triple = node.local_graph.triples[0]
+    assert triple.qualifiers["source_turn_ids"] == ["turn:0", "turn:1"]
+    assert len(triple.qualifiers["source_triple_ids"]) == 2
+    assert len(triple.qualifiers["maintenance_discarded_triple_ids"]) == 1
+    assert triple.qualifiers["maintenance_discarded_triple_ids"][0] != triple.triple_id
+    assert triple.qualifiers["maintenance_discarded_source_turn_ids"] == ["turn:1"]
     graph_records = [
         record
         for record in vector_store.records
@@ -361,6 +372,40 @@ def test_local_triple_maintenance_keep_existing_reindexes_active_graph_without_i
     ]
     assert graph_records[-1].text.endswith("- Alice likes tea")
     assert len(graph_records) == 2
+
+
+def test_local_triple_maintenance_duplicate_spo_merges_turn_provenance_without_llm(tmp_path):
+    maintenance_llm = MaintenanceLLM([])
+    memory = Memory.from_config(
+        {"storage": {"path": str(tmp_path / "memory.sqlite3")}},
+        extractor=SequenceHomogeneousExtractor(
+            [
+                _single_entity_payload(
+                    "Alice likes tea.",
+                    triples=[{"subject": "Alice", "predicate": "likes", "object": "tea"}],
+                ),
+                _single_entity_payload(
+                    "Alice still likes tea.",
+                    triples=[{"subject": "Alice", "predicate": "likes", "object": "tea"}],
+                ),
+            ]
+        ),
+        maintenance_llm=maintenance_llm,
+    )
+    namespace = "local_triple_duplicate_spo_ns"
+    memory.reset(namespace)
+
+    memory.add_memory("I like tea.", namespace=namespace)
+    memory.add_memory("I still like tea.", namespace=namespace)
+    node = memory.store.list_nodes(namespace)[0]
+    memory.close()
+
+    assert maintenance_llm.call_count == 0
+    assert len(node.local_graph.triples) == 1
+    triple = node.local_graph.triples[0]
+    assert triple.qualifiers["source_turn_ids"] == ["turn:0", "turn:1"]
+    assert len(triple.qualifiers["source_triple_ids"]) == 2
+    assert triple.qualifiers["maintenance_last_action"] == "duplicate_spo"
 
 
 def test_local_triple_maintenance_keep_both_preserves_compatible_values(tmp_path):
@@ -402,6 +447,10 @@ def test_local_triple_maintenance_keep_both_preserves_compatible_values(tmp_path
         ("tea", "active"),
         ("coffee", "active"),
     ]
+    assert node.local_graph.triples[1].qualifiers["maintenance_related_triple_ids"] == [
+        node.local_graph.triples[0].triple_id
+    ]
+    assert node.local_graph.triples[1].qualifiers["maintenance_related_source_turn_ids"] == ["turn:0"]
 
 
 def test_local_triple_maintenance_merge_replaces_candidates_with_merged_triple(tmp_path):
@@ -449,6 +498,13 @@ def test_local_triple_maintenance_merge_replaces_candidates_with_merged_triple(t
         ("OpenAI in San Francisco", "active"),
     ]
     assert node.local_graph.triples[1].qualifiers["specificity"] == "city"
+    assert node.local_graph.triples[0].superseded_by == node.local_graph.triples[1].triple_id
+    merged_from_ids = node.local_graph.triples[1].qualifiers["maintenance_merged_triple_ids"]
+    assert merged_from_ids[0] == node.local_graph.triples[0].triple_id
+    assert merged_from_ids[1].startswith("triple:")
+    assert merged_from_ids[1] != node.local_graph.triples[1].triple_id
+    assert len(node.local_graph.triples[1].qualifiers["source_triple_ids"]) == 2
+    assert node.local_graph.triples[1].qualifiers["maintenance_merged_source_turn_ids"] == ["turn:0", "turn:1"]
 
 
 def test_local_triple_maintenance_requires_llm_for_same_subject_predicate(tmp_path):

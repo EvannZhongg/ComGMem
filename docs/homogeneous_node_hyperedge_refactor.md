@@ -350,7 +350,7 @@ ExtractedEdgeSummary + member nodes -> HyperEdge(description, node_ids)
 - 已完成：存储与索引调整。SQLite 新 schema 不再创建旧 `edge_type/relation/polarity/role/role_in_edge/edge_relation/fact_property_index` 路径；向量 payload 清理旧 edge role 字段，turn dialogue payload 使用 `dialogue_roles`。
 - 已完成：移除旧 fact/property/typed-edge 维护 prompt 资源和 registry 入口，新增 `maintenance/node_summary_compaction.md` 与 `maintenance/local_triple_merge.md`。
 - 已完成：Node summary 维护第一阶段。同一 node 的不同来源 summary 在低于 `k` 时拼接；达到 `maintenance.node_summary.compact_after_k_sources` 或 token 上限时强触发 LLM 压缩；无维护 LLM 时显式失败。
-- 已完成：LocalTriple 维护第一阶段。同一 node 内先匹配 normalized S、再匹配 normalized P；S/P 相同即触发 LLM 路由，支持 keep_existing、keep_new、keep_both、merge、needs_review；无维护 LLM 时显式失败。
+- 已完成：LocalTriple 维护第一阶段。同一 node 内先匹配 normalized S；S/P/O 完全相同只合并系统来源 provenance，不触发 LLM；S/P 相同且 O 不同才触发 LLM 路由，支持 keep_existing、keep_new、keep_both、merge、needs_review；无维护 LLM 时显式失败。
 - 未开始：memory node merge/conflict、description-only edge maintenance、旧测试迁移、示例迁移。
 
 下一步建议继续 **阶段 6：维护逻辑泛化**，补齐统一 MemoryNode merge/conflict 与 description-only HyperEdge 维护。

@@ -14,6 +14,7 @@ from c_hypermem.pipeline.graph_utils import (
     deep_merge_dict,
 )
 from c_hypermem.schema import LocalTriple, MemoryNode
+from c_hypermem.utils.ids import make_local_triple_id, make_source_triple_id, semantic_triple_qualifiers
 from c_hypermem.utils.prompts import PromptRegistry
 from c_hypermem.utils.text import normalize_text
 from c_hypermem.utils.time import touch_node_update, utc_now_iso
@@ -63,12 +64,17 @@ class GraphMaintenance:
         incoming: MemoryNode,
         context: AssemblyContext,
     ) -> None:
+        _initialize_triple_provenance(incoming, context)
         for incoming_triple in incoming.local_graph.triples:
             same_subject = [
                 triple
                 for triple in existing.local_graph.triples
                 if triple.status == "active" and _triple_subject_key(triple) == _triple_subject_key(incoming_triple)
             ]
+            same_spo = [triple for triple in same_subject if _triple_op_key(triple) == _triple_op_key(incoming_triple)]
+            if same_spo:
+                _merge_duplicate_triple_provenance(same_spo[0], incoming_triple, context)
+                continue
             candidates = [
                 triple
                 for triple in same_subject
@@ -107,17 +113,24 @@ class GraphMaintenance:
         affected = [candidate_by_ref[ref] for ref in decision.affected_existing_refs if ref in candidate_by_ref]
 
         if decision.decision == "keep_existing":
+            for triple in affected or candidates:
+                _mark_triple_kept_over_incoming(triple, incoming_triple, decision, context)
             _record_triple_maintenance(node, "keep_existing", decision, context)
             return []
 
         if decision.decision == "keep_both":
+            related = affected or candidates
+            _mark_triple_kept_alongside_candidates(incoming_triple, related, decision, context)
+            for triple in related:
+                _mark_existing_kept_alongside_incoming(triple, incoming_triple, decision, context)
             node.local_graph.triples.append(incoming_triple)
             _record_triple_maintenance(node, "keep_both", decision, context)
             return [incoming_triple]
 
         if decision.decision == "keep_new":
             for triple in affected or candidates:
-                _retire_triple(triple, reason=decision.rationale, current_turn=context.current_turn)
+                _retire_triple(triple, reason=decision.rationale, current_turn=context.current_turn, replacement=incoming_triple)
+            _mark_triple_replacement(incoming_triple, affected or candidates, decision, context)
             node.local_graph.triples.append(incoming_triple)
             _record_triple_maintenance(node, "keep_new", decision, context)
             return [incoming_triple]
@@ -133,6 +146,14 @@ class GraphMaintenance:
                 object=decision.merged_triple.object.strip(),
                 qualifiers=decision.merged_triple.qualifiers,
             )
+            _initialize_triple_provenance_for_triple(merged, node, context)
+            _mark_triple_merge(merged, incoming_triple, affected or candidates, decision, context)
+            for triple in affected or candidates:
+                triple.superseded_by = merged.triple_id
+                triple.qualifiers = {
+                    **dict(triple.qualifiers),
+                    "maintenance_replaced_by_triple_id": merged.triple_id,
+                }
             node.local_graph.triples.append(merged)
             _record_triple_maintenance(node, "merge", decision, context)
             return [merged]
@@ -144,6 +165,7 @@ class GraphMaintenance:
                 "maintenance_decision": "needs_review",
                 "maintenance_rationale": decision.rationale,
             }
+            _mark_triple_needs_review(incoming_triple, affected or candidates, decision, context)
             node.local_graph.triples.append(incoming_triple)
             _record_triple_maintenance(node, "needs_review", decision, context)
             return [incoming_triple]
@@ -172,7 +194,7 @@ class GraphMaintenance:
                 "predicate": triple.predicate,
                 "object": triple.object,
                 "status": triple.status,
-                "qualifiers": _semantic_qualifiers(triple.qualifiers),
+                "qualifiers": semantic_triple_qualifiers(triple.qualifiers),
             }
             for index, triple in enumerate(candidates)
         ]
@@ -193,6 +215,7 @@ class GraphMaintenance:
         return rendered
 
     def _initialize_new_node(self, node: MemoryNode, context: AssemblyContext) -> MemoryNode:
+        _initialize_triple_provenance(node, context)
         if not self.config.maintenance.node_summary.enabled:
             return node
         state = _summary_state(node)
@@ -380,13 +403,229 @@ def _mark_summary_compacted(node: MemoryNode, trigger: dict[str, Any], context: 
     _set_summary_state(node, state)
 
 
-def _retire_triple(triple: LocalTriple, *, reason: str, current_turn: int | None) -> None:
+def _initialize_triple_provenance(node: MemoryNode, context: AssemblyContext) -> None:
+    for triple in node.local_graph.triples:
+        _initialize_triple_provenance_for_triple(triple, node, context)
+
+
+def _initialize_triple_provenance_for_triple(
+    triple: LocalTriple,
+    node: MemoryNode,
+    context: AssemblyContext,
+) -> None:
+    if triple.triple_id is None:
+        triple.triple_id = make_local_triple_id(
+            node.namespace,
+            node.node_id,
+            triple.subject,
+            triple.predicate,
+            triple.object,
+            triple.qualifiers,
+        )
+    source_turn_ids = _strings(node.metadata.get("source_turn_ids")) or _strings(context.metadata.get("turn_ids"))
+    qualifiers = dict(triple.qualifiers)
+    qualifiers["source_turn_ids"] = _unique_strings([*_strings(qualifiers.get("source_turn_ids")), *source_turn_ids])
+    source_triple_ids = _strings(qualifiers.get("source_triple_ids"))
+    if not source_triple_ids and triple.triple_id is not None:
+        source_triple_ids = [_source_triple_id(node.namespace, triple.triple_id, source_turn_ids)]
+    qualifiers["source_triple_ids"] = _unique_strings(source_triple_ids)
+    triple.qualifiers = qualifiers
+
+
+def _merge_duplicate_triple_provenance(
+    existing: LocalTriple,
+    incoming: LocalTriple,
+    context: AssemblyContext,
+) -> None:
+    qualifiers = dict(existing.qualifiers)
+    incoming_qualifiers = dict(incoming.qualifiers)
+    qualifiers["source_turn_ids"] = _unique_strings(
+        [*_strings(qualifiers.get("source_turn_ids")), *_strings(incoming_qualifiers.get("source_turn_ids"))]
+    )
+    qualifiers["source_triple_ids"] = _unique_strings(
+        [
+            *_strings(qualifiers.get("source_triple_ids")),
+            *_strings(incoming_qualifiers.get("source_triple_ids")),
+        ]
+    )
+    qualifiers["maintenance_last_action"] = "duplicate_spo"
+    qualifiers["maintenance_updated_turn"] = context.current_turn
+    qualifiers["maintenance_updated_at"] = utc_now_iso()
+    existing.qualifiers = qualifiers
+
+
+def _retire_triple(
+    triple: LocalTriple,
+    *,
+    reason: str,
+    current_turn: int | None,
+    replacement: LocalTriple | None = None,
+) -> None:
     triple.status = "retired"
     qualifiers = dict(triple.qualifiers)
     qualifiers["maintenance_status_reason"] = reason
     qualifiers["maintenance_updated_turn"] = current_turn
     qualifiers["maintenance_updated_at"] = utc_now_iso()
+    if replacement is not None:
+        triple.superseded_by = replacement.triple_id
+        qualifiers["maintenance_replaced_by_triple_id"] = replacement.triple_id
     triple.qualifiers = qualifiers
+
+
+def _mark_triple_kept_over_incoming(
+    existing: LocalTriple,
+    incoming: LocalTriple,
+    decision: LocalTripleMergeDecision,
+    context: AssemblyContext,
+) -> None:
+    qualifiers = dict(existing.qualifiers)
+    incoming_qualifiers = dict(incoming.qualifiers)
+    qualifiers["source_turn_ids"] = _unique_strings(
+        [*_strings(qualifiers.get("source_turn_ids")), *_strings(incoming_qualifiers.get("source_turn_ids"))]
+    )
+    qualifiers["source_triple_ids"] = _unique_strings(
+        [
+            *_strings(qualifiers.get("source_triple_ids")),
+            *_strings(incoming_qualifiers.get("source_triple_ids")),
+        ]
+    )
+    qualifiers["maintenance_last_action"] = "keep_existing"
+    qualifiers["maintenance_discarded_triple_ids"] = _unique_strings(
+        [*_strings(qualifiers.get("maintenance_discarded_triple_ids")), *([incoming.triple_id] if incoming.triple_id else [])]
+    )
+    qualifiers["maintenance_discarded_source_turn_ids"] = _unique_strings(
+        [
+            *_strings(qualifiers.get("maintenance_discarded_source_turn_ids")),
+            *_strings(incoming_qualifiers.get("source_turn_ids")),
+        ]
+    )
+    qualifiers["maintenance_rationale"] = decision.rationale
+    qualifiers["maintenance_updated_turn"] = context.current_turn
+    qualifiers["maintenance_updated_at"] = utc_now_iso()
+    existing.qualifiers = qualifiers
+
+
+def _mark_triple_kept_alongside_candidates(
+    incoming: LocalTriple,
+    candidates: list[LocalTriple],
+    decision: LocalTripleMergeDecision,
+    context: AssemblyContext,
+) -> None:
+    qualifiers = dict(incoming.qualifiers)
+    qualifiers["maintenance_last_action"] = "keep_both"
+    qualifiers["maintenance_related_triple_ids"] = _unique_strings(
+        [*_strings(qualifiers.get("maintenance_related_triple_ids")), *[triple.triple_id for triple in candidates if triple.triple_id]]
+    )
+    qualifiers["maintenance_related_source_turn_ids"] = _unique_strings(
+        [
+            *_strings(qualifiers.get("maintenance_related_source_turn_ids")),
+            *[turn_id for triple in candidates for turn_id in _strings(triple.qualifiers.get("source_turn_ids"))],
+        ]
+    )
+    qualifiers["maintenance_rationale"] = decision.rationale
+    qualifiers["maintenance_updated_turn"] = context.current_turn
+    qualifiers["maintenance_updated_at"] = utc_now_iso()
+    incoming.qualifiers = qualifiers
+
+
+def _mark_existing_kept_alongside_incoming(
+    existing: LocalTriple,
+    incoming: LocalTriple,
+    decision: LocalTripleMergeDecision,
+    context: AssemblyContext,
+) -> None:
+    qualifiers = dict(existing.qualifiers)
+    qualifiers["maintenance_last_action"] = "keep_both"
+    qualifiers["maintenance_related_triple_ids"] = _unique_strings(
+        [*_strings(qualifiers.get("maintenance_related_triple_ids")), *([incoming.triple_id] if incoming.triple_id else [])]
+    )
+    qualifiers["maintenance_related_source_turn_ids"] = _unique_strings(
+        [
+            *_strings(qualifiers.get("maintenance_related_source_turn_ids")),
+            *_strings(incoming.qualifiers.get("source_turn_ids")),
+        ]
+    )
+    qualifiers["maintenance_rationale"] = decision.rationale
+    qualifiers["maintenance_updated_turn"] = context.current_turn
+    qualifiers["maintenance_updated_at"] = utc_now_iso()
+    existing.qualifiers = qualifiers
+
+
+def _mark_triple_replacement(
+    incoming: LocalTriple,
+    replaced: list[LocalTriple],
+    decision: LocalTripleMergeDecision,
+    context: AssemblyContext,
+) -> None:
+    qualifiers = dict(incoming.qualifiers)
+    qualifiers["maintenance_last_action"] = "keep_new"
+    qualifiers["maintenance_replaced_triple_ids"] = _unique_strings(
+        [*_strings(qualifiers.get("maintenance_replaced_triple_ids")), *[triple.triple_id for triple in replaced if triple.triple_id]]
+    )
+    qualifiers["maintenance_replaced_source_turn_ids"] = _unique_strings(
+        [
+            *_strings(qualifiers.get("maintenance_replaced_source_turn_ids")),
+            *[turn_id for triple in replaced for turn_id in _strings(triple.qualifiers.get("source_turn_ids"))],
+        ]
+    )
+    qualifiers["maintenance_rationale"] = decision.rationale
+    qualifiers["maintenance_updated_turn"] = context.current_turn
+    qualifiers["maintenance_updated_at"] = utc_now_iso()
+    incoming.qualifiers = qualifiers
+
+
+def _mark_triple_merge(
+    merged: LocalTriple,
+    incoming: LocalTriple,
+    merged_from: list[LocalTriple],
+    decision: LocalTripleMergeDecision,
+    context: AssemblyContext,
+) -> None:
+    qualifiers = dict(merged.qualifiers)
+    source_turn_ids = [
+        *[turn_id for triple in merged_from for turn_id in _strings(triple.qualifiers.get("source_turn_ids"))],
+        *_strings(incoming.qualifiers.get("source_turn_ids")),
+    ]
+    source_triple_ids = [
+        *[source_id for triple in merged_from for source_id in _strings(triple.qualifiers.get("source_triple_ids"))],
+        *_strings(incoming.qualifiers.get("source_triple_ids")),
+    ]
+    merged_triple_ids = [
+        *[triple.triple_id for triple in merged_from if triple.triple_id],
+        *([incoming.triple_id] if incoming.triple_id else []),
+    ]
+    qualifiers["source_turn_ids"] = _unique_strings(source_turn_ids)
+    qualifiers["source_triple_ids"] = _unique_strings(source_triple_ids)
+    qualifiers["maintenance_last_action"] = "merge"
+    qualifiers["maintenance_merged_triple_ids"] = _unique_strings(merged_triple_ids)
+    qualifiers["maintenance_merged_source_turn_ids"] = _unique_strings(source_turn_ids)
+    qualifiers["maintenance_rationale"] = decision.rationale
+    qualifiers["maintenance_updated_turn"] = context.current_turn
+    qualifiers["maintenance_updated_at"] = utc_now_iso()
+    merged.qualifiers = qualifiers
+
+
+def _mark_triple_needs_review(
+    incoming: LocalTriple,
+    candidates: list[LocalTriple],
+    decision: LocalTripleMergeDecision,
+    context: AssemblyContext,
+) -> None:
+    qualifiers = dict(incoming.qualifiers)
+    qualifiers["maintenance_last_action"] = "needs_review"
+    qualifiers["maintenance_related_triple_ids"] = _unique_strings(
+        [*_strings(qualifiers.get("maintenance_related_triple_ids")), *[triple.triple_id for triple in candidates if triple.triple_id]]
+    )
+    qualifiers["maintenance_related_source_turn_ids"] = _unique_strings(
+        [
+            *_strings(qualifiers.get("maintenance_related_source_turn_ids")),
+            *[turn_id for triple in candidates for turn_id in _strings(triple.qualifiers.get("source_turn_ids"))],
+        ]
+    )
+    qualifiers["maintenance_rationale"] = decision.rationale
+    qualifiers["maintenance_updated_turn"] = context.current_turn
+    qualifiers["maintenance_updated_at"] = utc_now_iso()
+    incoming.qualifiers = qualifiers
 
 
 def _record_triple_maintenance(
@@ -407,10 +646,6 @@ def _record_triple_maintenance(
     node.metadata["maintenance"] = maintenance
 
 
-def _triple_sp_key(triple: LocalTriple) -> tuple[str, str]:
-    return (normalize_text(triple.subject), normalize_text(triple.predicate))
-
-
 def _triple_subject_key(triple: LocalTriple) -> str:
     return normalize_text(triple.subject)
 
@@ -419,28 +654,22 @@ def _triple_predicate_key(triple: LocalTriple) -> str:
     return normalize_text(triple.predicate)
 
 
+def _triple_op_key(triple: LocalTriple) -> tuple[str, str]:
+    return (normalize_text(triple.predicate), normalize_text(triple.object))
+
+
+def _source_triple_id(namespace: str, triple_id: str, source_turn_ids: list[str]) -> str:
+    return make_source_triple_id(namespace, triple_id, source_turn_ids or ["turn:unknown"])
+
+
 def _triple_prompt_payload(triple: LocalTriple) -> dict[str, Any]:
     return {
         "subject": triple.subject,
         "predicate": triple.predicate,
         "object": triple.object,
         "status": triple.status,
-        "qualifiers": _semantic_qualifiers(triple.qualifiers),
+        "qualifiers": semantic_triple_qualifiers(triple.qualifiers),
     }
-
-
-def _semantic_qualifiers(qualifiers: dict[str, Any]) -> dict[str, Any]:
-    system_keys = {
-        "scope_edge_id",
-        "scope_cluster_id",
-        "edge_description",
-        "maintenance_status_reason",
-        "maintenance_updated_turn",
-        "maintenance_updated_at",
-        "maintenance_decision",
-        "maintenance_rationale",
-    }
-    return {key: value for key, value in qualifiers.items() if key not in system_keys}
 
 
 def _source_turn_ids(node: MemoryNode) -> list[str]:

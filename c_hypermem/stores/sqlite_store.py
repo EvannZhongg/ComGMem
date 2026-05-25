@@ -16,7 +16,7 @@ from c_hypermem.schema import (
     MemoryNode,
     TimeBundle,
 )
-from c_hypermem.utils.ids import make_member_signature, make_triple_id
+from c_hypermem.utils.ids import make_local_triple_id, make_member_signature
 from c_hypermem.utils.time import utc_now_iso
 from c_hypermem.utils.text import tokenize
 
@@ -49,7 +49,7 @@ class SQLiteStore:
             for node in nodes:
                 for triple in node.local_graph.triples:
                     if triple.triple_id is None:
-                        triple.triple_id = make_triple_id(
+                        triple.triple_id = make_local_triple_id(
                             node.namespace,
                             node.node_id,
                             triple.subject,
