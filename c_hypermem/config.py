@@ -169,16 +169,11 @@ class IndexConfig(BaseModel):
 
 class RetrievalConfig(BaseModel):
     query_analysis: Literal[False, "llm", "nlp"] = False
-    lexical_top_n: int = 30
-    vector_top_n: int = 30
-    edge_top_n: int = 30
-    rerank_top_n: int = 12
-    use_hyperedge_expansion: bool = True
-    use_edge_cluster_expansion: bool = False
-    use_temporal_filter: bool = True
-    use_recency_decay: bool = True
-    recency_decay_lambda: float = 0.03
-    access_boost: float = 0.05
+    lexical_top_k: int = 30
+    node_content_vector_top_k: int = 20
+    node_local_graph_vector_top_k: int = 20
+    node_summary_vector_top_k: int = 10
+    final_top_k: int = 10
 
 
 class MemoryConfig(BaseModel):

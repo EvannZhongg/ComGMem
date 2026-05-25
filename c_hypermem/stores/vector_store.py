@@ -21,6 +21,14 @@ class VectorRecord:
 
 
 @dataclass(frozen=True)
+class VectorSearchHit:
+    id: str
+    score: float
+    payload: dict[str, Any]
+    text: str = ""
+
+
+@dataclass(frozen=True)
 class VectorIndexItem:
     id: str
     text: str
@@ -34,6 +42,15 @@ class VectorStore(Protocol):
     """Dense index abstraction for rebuildable memory indexes."""
 
     def upsert(self, records: Sequence[VectorRecord]) -> None: ...
+
+    def search(
+        self,
+        *,
+        query: str,
+        vector: list[float],
+        top_k: int,
+        filters: dict[str, Any] | None = None,
+    ) -> list[VectorSearchHit]: ...
 
     def delete(self, ids: Sequence[str]) -> None: ...
 
@@ -98,6 +115,47 @@ class QdrantVectorStore:
             self.client.upsert(collection_name=self.collection_name, points=points, wait=True)
         except Exception as exc:
             raise StoreError(f"Failed to upsert {len(records)} vector record(s) into Qdrant.") from exc
+
+    def search(
+        self,
+        *,
+        query: str,
+        vector: list[float],
+        top_k: int,
+        filters: dict[str, Any] | None = None,
+    ) -> list[VectorSearchHit]:
+        if top_k <= 0 or not vector:
+            return []
+        if self._client is None and not self.path.exists():
+            return []
+        if not self._collection_exists():
+            return []
+        try:
+            result = self.client.query_points(
+                collection_name=self.collection_name,
+                query=vector,
+                query_filter=_qdrant_filter(filters or {}),
+                limit=top_k,
+                with_payload=True,
+                with_vectors=False,
+            )
+        except Exception as exc:
+            raise StoreError(f"Failed to search Qdrant collection {self.collection_name!r} for query {query!r}.") from exc
+
+        points = getattr(result, "points", result)
+        hits: list[VectorSearchHit] = []
+        for point in points or []:
+            payload = dict(getattr(point, "payload", None) or {})
+            text = str(payload.pop("text", "") or "")
+            hits.append(
+                VectorSearchHit(
+                    id=str(getattr(point, "id", "")),
+                    score=float(getattr(point, "score", 0.0) or 0.0),
+                    payload=payload,
+                    text=text,
+                )
+            )
+        return hits
 
     def delete_namespace(self, namespace: str) -> None:
         if self._client is None and not self.path.exists():
@@ -441,3 +499,21 @@ def _collection_vector_size(collection: Any) -> int | None:
         if hasattr(first, "size"):
             return int(first.size)
     return None
+
+
+def _qdrant_filter(filters: dict[str, Any]) -> Any | None:
+    if not filters:
+        return None
+    try:
+        from qdrant_client.http.models import FieldCondition, Filter, MatchValue
+    except ImportError as exc:
+        raise ConfigError("Install c-hypermem[vector] to use the Qdrant vector store.") from exc
+
+    conditions = [
+        FieldCondition(key=key, match=MatchValue(value=value))
+        for key, value in filters.items()
+        if value is not None
+    ]
+    if not conditions:
+        return None
+    return Filter(must=conditions)

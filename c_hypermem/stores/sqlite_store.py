@@ -37,6 +37,7 @@ class SQLiteStore:
                 "edge_clusters",
                 "hyper_edge_members",
                 "hyper_edges",
+                "nodes_fts",
                 "nodes",
                 "fact_property_index",
                 "entity_alias_index",
@@ -110,6 +111,24 @@ class SQLiteStore:
                         _to_json(node.metadata),
                     ),
                 )
+                self.conn.execute(
+                    "DELETE FROM nodes_fts WHERE namespace = ? AND node_id = ?",
+                    (node.namespace, node.node_id),
+                )
+                if node.status == "active":
+                    self.conn.execute(
+                        """
+                        INSERT INTO nodes_fts(namespace, node_id, content, summary, local_graph)
+                        VALUES (?, ?, ?, ?, ?)
+                        """,
+                        (
+                            node.namespace,
+                            node.node_id,
+                            node.content,
+                            node.summary,
+                            _local_graph_fts_text(node),
+                        ),
+                    )
                 self.conn.execute(
                     "DELETE FROM triples WHERE namespace = ? AND owner_node_id = ?",
                     (node.namespace, node.node_id),
@@ -547,6 +566,28 @@ class SQLiteStore:
             by_id[node.node_id] = node
         return [by_id[node_id] for node_id in node_ids if node_id in by_id]
 
+    def search_nodes_fts(self, namespace: str, query: str, top_k: int) -> list[tuple[MemoryNode, float]]:
+        if top_k <= 0 or not query.strip():
+            return []
+        try:
+            rows = self.conn.execute(
+                """
+                SELECT n.*, bm25(nodes_fts) AS lexical_rank
+                FROM nodes_fts
+                JOIN nodes n
+                  ON n.namespace = nodes_fts.namespace AND n.node_id = nodes_fts.node_id
+                WHERE nodes_fts MATCH ?
+                  AND nodes_fts.namespace = ?
+                  AND n.status = 'active'
+                ORDER BY lexical_rank
+                LIMIT ?
+                """,
+                (query, namespace, top_k),
+            ).fetchall()
+        except sqlite3.Error as exc:
+            raise StoreError(f"SQLite FTS node search failed for query {query!r}.") from exc
+        return [(_node_from_row(row), -float(row["lexical_rank"] or 0.0)) for row in rows]
+
     def get_incident_edges(self, namespace: str, node_ids: list[str]) -> list[HyperEdge]:
         if not node_ids:
             return []
@@ -648,6 +689,14 @@ class SQLiteStore:
 
                     CREATE INDEX IF NOT EXISTS idx_nodes_namespace_normalized_text
                         ON nodes(namespace, normalized_text);
+
+                    CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(
+                        namespace UNINDEXED,
+                        node_id UNINDEXED,
+                        content,
+                        summary,
+                        local_graph
+                    );
 
                     CREATE TABLE IF NOT EXISTS hyper_edges (
                         namespace TEXT NOT NULL,
@@ -873,6 +922,13 @@ def _cluster_member_from_row(row: sqlite3.Row) -> EdgeClusterMember:
         relation_to_cluster=row["relation_to_cluster"],
         status=row["status"],
         metadata=_from_json(row["metadata_json"], {}),
+    )
+
+
+def _local_graph_fts_text(node: MemoryNode) -> str:
+    return " ".join(
+        f"{triple.subject} {triple.predicate} {triple.object}"
+        for triple in node.local_graph.triples
     )
 
 

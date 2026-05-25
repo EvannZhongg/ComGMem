@@ -87,13 +87,8 @@ index:
 retrieval:
   # Query analysis modes: false disables analysis for evaluation; "llm" uses prompts/retrieval/query_analysis.md; "nlp" uses optional spaCy processing.
   query_analysis: false
-  lexical_top_n: 30
-  vector_top_n: 30
-  edge_top_n: 30
-  rerank_top_n: 12
-  use_hyperedge_expansion: true
-  use_edge_cluster_expansion: false
-  use_temporal_filter: true
-  use_recency_decay: true
-  recency_decay_lambda: 0.03
-  access_boost: 0.05
+  lexical_top_k: 30
+  node_content_vector_top_k: 20
+  node_local_graph_vector_top_k: 20
+  node_summary_vector_top_k: 10
+  final_top_k: 10

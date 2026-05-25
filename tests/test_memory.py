@@ -17,10 +17,10 @@ from c_hypermem.pipeline.local_graph_builder import LocalGraphBuilder
 from c_hypermem.pipeline.maintenance import GraphMaintenance
 from c_hypermem.pipeline.node_builder import NodeBuilder, collect_entities
 from c_hypermem.pipeline.extraction import ExtractionContext, ExtractionWindow, LLMMemoryExtractor, _render_node_labels
-from c_hypermem.retrieval.expansion import EdgeExpansion
 from c_hypermem.schema import ExtractedAssertion, ExtractedEntity, MemoryExtraction, Message
 from c_hypermem.stores.vector_store import (
     QdrantVectorStore,
+    VectorSearchHit,
     collect_node_local_graph_index_items,
     make_vector_point_id,
     node_local_graph_embedding_text,
@@ -83,7 +83,7 @@ def test_add_uses_explicit_extractor_only(tmp_path):
     assert stats["turn_messages"] == 1
     assert results
     assert "Alice prefers morning interviews" in results[0]["content"]
-    assert "state" in results[0]["metadata"]["edge_types"]
+    assert "lexical" in results[0]["metadata"]["channels"]
     assert all(node.metadata.get("source_turn_ids") == ["turn:0"] for node in nodes)
     assert all(edge.metadata.get("source_turn_ids") == ["turn:0"] for edge in edges)
 
@@ -159,6 +159,12 @@ def test_default_config_includes_split_config_files():
     assert config.index.vector == "qdrant"
     assert config.index.vector_store.backend == "qdrant"
     assert config.index.vector_store.collection_name == "c_hypermem_memory"
+    assert config.retrieval.query_analysis is False
+    assert config.retrieval.lexical_top_k == 30
+    assert config.retrieval.node_content_vector_top_k == 20
+    assert config.retrieval.node_local_graph_vector_top_k == 20
+    assert config.retrieval.node_summary_vector_top_k == 10
+    assert config.retrieval.final_top_k == 10
     assert config.local_graph.configured_by_node_labels
     assert config.node_labels.labels["event"].indexing.time_index
     assert dict_config.llm is not None
@@ -758,20 +764,62 @@ def test_reused_edge_cluster_appends_description_variants(tmp_path):
     assert "Alice loves coffee" in indexed_variant_texts
 
 
-def test_retriever_delegates_graph_expansion(tmp_path):
+def test_retriever_uses_sqlite_fts_recall(tmp_path):
     memory = Memory.from_config(
         {"storage": {"path": str(tmp_path / "memory.sqlite3")}},
         extractor=StaticExtractor(),
     )
-    namespace = "retrieval_expansion_ns"
+    namespace = "sqlite_fts_recall_ns"
     memory.reset(namespace)
 
     memory.add_memory("Alice prefers morning interviews.", namespace=namespace)
     results = memory.search("Alice", namespace=namespace, top_k=5)
     memory.close()
 
-    assert isinstance(memory.retriever.expansion, EdgeExpansion)
-    assert any("edge_coherence" in result["metadata"]["score_parts"] for result in results)
+    assert results
+    assert "lexical" in results[0]["metadata"]["channels"]
+    assert "rrf_lexical" in results[0]["metadata"]["score_parts"]
+
+
+def test_query_analysis_false_embeds_query_and_uses_vector_recall(tmp_path):
+    embedding_client = RecordingEmbeddingClient()
+    vector_store = RecordingVectorStore()
+    memory = Memory.from_config(
+        {"storage": {"path": str(tmp_path / "memory.sqlite3")}},
+        extractor=StaticExtractor(),
+        embedding_client=embedding_client,
+        vector_store=vector_store,
+    )
+    namespace = "vector_recall_ns"
+    memory.reset(namespace)
+
+    memory.add_memory("Alice prefers morning interviews.", namespace=namespace)
+    hit_record = next(
+        record
+        for record in vector_store.records
+        if record.payload["item_type"] == "node_content" and "Alice prefers morning interviews" in record.text
+    )
+    embedding_client.inputs.clear()
+    vector_store.search_hits = [
+        VectorSearchHit(
+            id=hit_record.id,
+            score=0.92,
+            payload=hit_record.payload,
+            text=hit_record.text,
+        )
+    ]
+
+    results = memory.search("opaque vector query", namespace=namespace, top_k=1)
+    memory.close()
+
+    assert embedding_client.inputs == [["opaque vector query"]]
+    assert vector_store.search_calls
+    assert vector_store.search_calls[0]["vector"] == [0.0, 1.0]
+    assert [call["top_k"] for call in vector_store.search_calls] == [20, 20, 10]
+    assert results[0]["id"] == hit_record.payload["node_id"]
+    assert "vector" in results[0]["metadata"]["channels"]
+    assert results[0]["metadata"]["score_parts"]["rrf_vector"] == 1 / 61
+    assert results[0]["metadata"]["query_analysis"]["mode"] == "false"
 
 
 def test_node_builder_delegates_local_graph_construction():
@@ -981,6 +1029,8 @@ class RecordingVectorStore:
     def __init__(self, name="recording"):
         self.name = name
         self.records = []
+        self.search_hits = []
+        self.search_calls = []
         self.deleted_ids = []
         self.delete_calls = []
         self.deleted_namespaces = []
@@ -988,6 +1038,17 @@ class RecordingVectorStore:
 
     def upsert(self, records):
         self.records.extend(records)
+
+    def search(self, *, query, vector, top_k, filters=None):
+        self.search_calls.append(
+            {
+                "query": query,
+                "vector": vector,
+                "top_k": top_k,
+                "filters": filters or {},
+            }
+        )
+        return list(self.search_hits)[:top_k]
 
     def delete(self, ids):
         ids = list(ids)

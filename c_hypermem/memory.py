@@ -88,6 +88,8 @@ class Memory:
             config.retrieval,
             nlp_config=config.nlp,
             query_analysis_llm=query_analysis_llm,
+            embedding_client=self.embedding_client,
+            vector_stores=self.vector_stores,
         )
         self._turn_counters: dict[str, int] = {}
 
