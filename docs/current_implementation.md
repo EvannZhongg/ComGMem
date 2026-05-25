@@ -14,13 +14,14 @@
 ## 2. 配置与环境
 
 - 默认配置入口为 `configs/default.yaml`。
-- 模型配置拆在 `configs/models.yaml`，节点标签配置拆在 `configs/node_labels.yaml`。
+- 模型配置拆在 `configs/models.yaml`，节点标签和 turn 记录配置拆在 `configs/node_labels.yaml`。
 - 仅读取 C-HyperMem 项目根目录下的 `.env`，当前可以直接使用`.env`调用模型进行测试。
 - `.env` 已加入 `.gitignore`，仓库提供 `.env.example`。
 - `embedding.batch_size` 已加入配置，默认值为 `10`。
 - `ingestion.context_window_messages` 控制传给抽取模型的最近上下文消息数，默认值为 `3`。
 - `index.vector` 默认改为 `qdrant`；`index.vector_store` 提供本地 Qdrant 路径和 collection 名称，默认无需用户额外配置服务端。
-- 当前默认节点标签包括：`turn/event/fact/entity/state/preference/task/instruction/tool`。
+- 当前默认节点标签包括：`event/fact/entity/state/preference/task/instruction/tool`。
+- `turn` 不是 `MemoryNode` 标签；它是独立的原始对话记录配置，写入 `turns` 表和 `turn_dialogue` 向量索引，不需要 `LocalNodeGraph`。
 - `default_policy` 是系统内部 fallback 策略；传入 prompt 时不会以 `default_policy` 名称暴露给 LLM。
 
 ## 3. 当前 Schema
@@ -235,7 +236,7 @@ SearchResult 当前结构要点：
 当前实现仍低于设计文档的部分：
 
 - 维护 prompt 已存在；`contradiction_check` 已接入主流程，但 `fact_merge/edge_merge/edge_conflict_check/edge_cluster_merge` 的 LLM 调用链尚未接入。
-- `turn/state/task/instruction/tool` 已作为标签配置存在，但尚未都有专门构建策略；当前主要依靠 LLM 输出 labels 和统一节点结构承载。
+- `state/task/instruction/tool` 已作为标签配置存在，但尚未都有专门构建策略；当前主要依靠 LLM 输出 labels 和统一节点结构承载。`turn` 已从节点标签配置中独立出来，只作为对话记录和来源追踪配置。
 - 检索主流程已接入 node_content、node_summary、node-local-graph 三路向量召回，但尚未接入 EdgeCluster canonical / variant 向量召回，也未接入 turn_dialogue 向量召回。
 - EdgeCluster 已按 topic fingerprint 查库复用并追加新边；检索侧已能在命中 edge 所属 cluster 时带出 `description_variants` 和 sibling edge nodes，但尚未实现相似 cluster 向量召回、LLM cluster merge、后台宏观整理和复杂冲突状态维护。
 - LocalNodeGraph 当前只覆盖 event participants、entity attributes 和 assertion SPO；还没有从事件内部关系、工具调用、任务状态中构建更丰富的局部图。
@@ -270,8 +271,8 @@ SearchResult 当前结构要点：
   原因：让 LLM 同时抽取 facts、attributes、triples 容易重复写入同一事实。当前以 assertions 为主输入，能保持信息来源单一。
 
 - **标签专门策略**  
-  设计方向：`turn/state/task/instruction/tool` 可有各自的时间、索引、检索策略。  
-  当前方案：这些标签先通过统一 `MemoryNode` 承载，暂不新增专用 schema 或强规则构建器。  
+  设计方向：`state/task/instruction/tool` 可有各自的时间、索引、检索策略；`turn` 作为独立对话记录可有自己的时间和 turn_dialogue 索引策略。  
+  当前方案：`state/task/instruction/tool` 先通过统一 `MemoryNode` 承载，暂不新增专用 schema 或强规则构建器；`turn` 写入 `turns` 表，不作为节点入库。  
   原因：真实 agent 数据中的 tool/task/instruction 形态差异较大，过早固定策略会限制后续适配。
 
 - **检索增强**

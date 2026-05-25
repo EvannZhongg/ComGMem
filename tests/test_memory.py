@@ -148,8 +148,13 @@ def test_default_config_includes_split_config_files():
     assert "node_types" not in default_raw
     assert config.extraction.prompt == "extraction/memory_extraction.md"
     assert config.extraction.pass_node_labels_to_prompt
+    assert config.turn.enabled
+    assert config.turn.indexing.time_index
+    assert config.turn.time.prefer_world_time
+    assert not hasattr(config.turn, "local_graph")
     assert "entity" in config.node_labels.labels
-    assert {"turn", "event", "fact", "entity", "state", "preference", "task", "instruction", "tool"} <= set(
+    assert "turn" not in config.node_labels.labels
+    assert {"event", "fact", "entity", "state", "preference", "task", "instruction", "tool"} <= set(
         config.node_labels.labels
     )
     assert config.node_identity.strategy == "canonical_fingerprint"
@@ -437,6 +442,7 @@ def test_extraction_prompt_injects_node_label_config():
     assert "{{STRICT_JSON_SHAPE}}" not in prompt
     assert "- entity:" in prompt
     assert "- instruction:" in prompt
+    assert "- turn:" not in prompt
     assert "Other precise labels are allowed" in prompt
     assert "node_id" in prompt
     assert "## Interaction Metadata" in prompt

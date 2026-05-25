@@ -72,9 +72,10 @@ fact:toby_is_cat
 
 `fact`、`entity`、`event`、`preference`、`task`、`instruction` 不是三套不同内部结构，而是默认 `node_labels`。它们应作为同级 `MemoryNode` 标签处理；差异只体现在抽取偏好、索引策略、维护策略和可参与的超边模板上，不应体现在节点 schema 或固定 builder 路径上。后续接入真实 agent 场景时，可以通过配置扩展出 `tool`、`observation`、`attachment`、`trace` 等标签。
 
+`turn` 不应作为 `MemoryNode` 标签。它是原始对话交互记录，用于保存来源文本、说话人角色、顺序、turn_id 和后续 evidence tracing。turn 可以有独立的时间和索引策略，例如 `turn_dialogue` 向量，但不需要 `LocalNodeGraph`。
+
 默认节点类型可以包括：
 
-- `turn`：原始对话轮次，用于保留来源。
 - `event`：带真实世界时间锚点的事件、经历或会话片段。
 - `fact`：可查询的原子事实。
 - `entity`：人物、地点、项目、宠物、组织等主体。

@@ -81,6 +81,18 @@ class TimePolicyConfig(BaseModel):
     prefer_world_time: bool = False
 
 
+class TurnConfig(BaseModel):
+    enabled: bool = True
+    description: str = (
+        "Raw conversation turns or message spans that preserve source text, "
+        "speaker role, order, and provenance for later evidence tracing."
+    )
+    time: TimePolicyConfig = Field(default_factory=lambda: TimePolicyConfig(prefer_world_time=True))
+    indexing: IndexingPolicyConfig = Field(
+        default_factory=lambda: IndexingPolicyConfig(lexical=True, vector=True, time_index=True)
+    )
+
+
 class NodeLabelConfig(BaseModel):
     enabled: bool = True
     description: str = ""
@@ -191,6 +203,7 @@ class MemoryConfig(BaseModel):
     extraction: ExtractionConfig = Field(default_factory=ExtractionConfig)
     node_identity: NodeIdentityConfig = Field(default_factory=NodeIdentityConfig)
     node_labels: NodeLabelsConfig = Field(default_factory=NodeLabelsConfig)
+    turn: TurnConfig = Field(default_factory=TurnConfig)
     hyperedges: HyperEdgesConfig = Field(default_factory=HyperEdgesConfig)
     edge_clusters: EdgeClustersConfig = Field(default_factory=EdgeClustersConfig)
     local_graph: LocalGraphConfig = Field(default_factory=LocalGraphConfig)

@@ -1,14 +1,14 @@
+turn:
+  enabled: true
+  description: "Raw conversation turns or message spans that preserve source text, speaker role, order, and provenance for later evidence tracing."
+  time: {prefer_world_time: true}
+  indexing: {lexical: true, vector: true, time_index: true}
+
 node_labels:
   default_policy:
     description: "System fallback for labels that are not listed below. The model may emit a precise semantic label when a reusable memory object does not fit the configured labels."
     local_graph: {enabled: true, allow_triples: true, allow_attributes: true, allow_roles: true}
     indexing: {lexical: true, vector: true}
-  turn:
-    enabled: true
-    description: "Raw conversation turns or message spans that preserve source text, speaker role, order, and provenance for later evidence tracing."
-    time: {prefer_world_time: true}
-    local_graph: {enabled: true, allow_triples: true, allow_attributes: true, allow_roles: true}
-    indexing: {lexical: true, vector: true, time_index: true}
   entity:
     enabled: true
     description: "Named or referential objects that can be reused across memories, such as people, organizations, places, projects, products, files, tools, and other referents that may appear again."
