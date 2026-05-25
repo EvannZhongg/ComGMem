@@ -107,14 +107,12 @@ class GraphRippleExpansion:
                     score_parts={},
                     vector_hits=[],
                     edge_ids=set(),
-                    edge_types=set(),
                     cluster_ids=set(),
                     cluster_description_variants=[],
                 ),
             )
             item.channels.add("graph")
             item.edge_ids.add(edge.edge_id)
-            item.edge_types.add(edge.edge_type)
             for cluster in clusters:
                 item.cluster_ids.add(cluster.cluster_id)
                 self._add_cluster_variants(item, cluster)

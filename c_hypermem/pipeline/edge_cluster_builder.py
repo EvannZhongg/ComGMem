@@ -76,7 +76,7 @@ class BasicEdgeClusterBuilder:
             namespace=context.namespace,
             cluster_id=cluster.cluster_id,
             edge_id=edge.edge_id,
-            relation_to_cluster="updates" if edge.edge_type == "correction" else "supports",
+            relation_to_cluster=str(edge.metadata.get("relation_to_cluster") or "supports"),
         )
         return cluster, member, created
 
@@ -105,9 +105,9 @@ class BasicEdgeClusterBuilder:
             canonical_description=cluster_description,
             cluster_labels=[label],
             aliases=[compact_key(cluster_description)] if compact_key(cluster_description) else [],
-            conflict_state="contains_conflict" if edge.edge_type == "correction" else "none",
+            conflict_state=str(edge.metadata.get("conflict_state") or "none"),  # type: ignore[arg-type]
             description_variants=[EdgeDescriptionVariant(text=edge.description, source_edge_id=edge.edge_id)],
-            metadata=source_metadata(context, source_ref=edge.edge_type),
+            metadata=source_metadata(context, source_ref=None),
         )
         return cluster, True
 
@@ -142,14 +142,11 @@ def cluster_fingerprint_for_edge(edge: HyperEdge, label: str, cluster_descriptio
 
 
 def edge_cluster_label(edge: HyperEdge) -> str:
-    if edge.edge_type == "state":
-        return "entity_state"
-    if edge.edge_type == "correction":
-        return "conflict_resolution"
-    return f"{edge.edge_type}_context"
+    label = edge.metadata.get("cluster_label")
+    if isinstance(label, str) and label.strip():
+        return compact_key(label)
+    return "memory_context"
 
 
 def cluster_description_for_edge(edge: HyperEdge) -> str:
-    if edge.edge_type == "state":
-        return edge.description
-    return f"{edge.edge_type}: {edge.relation}"
+    return edge.description

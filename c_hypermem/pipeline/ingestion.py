@@ -90,7 +90,7 @@ class IngestionPipeline:
         window = ExtractionWindow(context=list(recent_messages or []), target=messages)
         extraction = self.extractor.extract(window, context)
         assembly_context = AssemblyContext(namespace=namespace, metadata=metadata, current_turn=current_turn)
-        nodes, retired_nodes, edges, edge_clusters, edge_cluster_members, entity_aliases, fact_properties = (
+        nodes, retired_nodes, edges, edge_clusters, edge_cluster_members, entity_aliases = (
             self.assembler.assemble(
                 extraction,
                 assembly_context,
@@ -128,7 +128,6 @@ class IngestionPipeline:
             edge_clusters=edge_clusters,
             edge_cluster_members=edge_cluster_members,
             entity_aliases=entity_aliases,
-            fact_properties=fact_properties,
         )
 
 

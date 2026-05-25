@@ -3,7 +3,7 @@ from __future__ import annotations
 from c_hypermem.schema import MemoryNode
 
 
-def compose_result_content(node: MemoryNode, edge_types: list[str]) -> str:
+def compose_result_content(node: MemoryNode, edge_ids: list[str]) -> str:
     label = "+".join(node.node_labels) if node.node_labels else "memory"
     source = node.metadata.get("source_session_id")
     date = node.metadata.get("date") or node.time.world.event_time
@@ -12,7 +12,7 @@ def compose_result_content(node: MemoryNode, edge_types: list[str]) -> str:
         suffix_parts.append(f"session={source}")
     if date:
         suffix_parts.append(f"date={date}")
-    if edge_types:
-        suffix_parts.append(f"edge_types={','.join(edge_types)}")
+    if edge_ids:
+        suffix_parts.append(f"edge_ids={','.join(edge_ids)}")
     suffix = f"\nSource: {' '.join(suffix_parts)}" if suffix_parts else ""
     return f"[{label}] {node.content}{suffix}"

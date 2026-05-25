@@ -13,7 +13,6 @@ class Candidate:
     score: float
     score_parts: dict[str, float] = field(default_factory=dict)
     edge_ids: set[str] = field(default_factory=set)
-    edge_types: set[str] = field(default_factory=set)
 
 
 class EdgeExpansion:
@@ -32,7 +31,7 @@ class EdgeExpansion:
             expanded_ids.extend(
                 node_id
                 for node_id in edge.node_ids
-                if node_id not in candidates and _expandable_role(edge, node_id)
+                if node_id not in candidates
             )
 
         expanded_nodes = self.store.get_nodes(namespace, list(dict.fromkeys(expanded_ids)))
@@ -41,8 +40,7 @@ class EdgeExpansion:
             incident = [edge for edge in edges if node.node_id in edge.node_ids]
             for edge in incident:
                 candidate.edge_ids.add(edge.edge_id)
-                candidate.edge_types.add(edge.edge_type)
-            expansion_score = 0.35 + min(len(candidate.edge_types), 3) * 0.1
+            expansion_score = 0.35 + min(len(candidate.edge_ids), 3) * 0.1
             candidate.score += expansion_score
             candidate.score_parts["edge_expansion"] = candidate.score_parts.get("edge_expansion", 0.0) + expansion_score
 
@@ -56,20 +54,7 @@ class EdgeExpansion:
             if seed_id not in edge.node_ids or seed_id not in candidates:
                 continue
             candidates[seed_id].edge_ids.add(edge.edge_id)
-            candidates[seed_id].edge_types.add(edge.edge_type)
             candidates[seed_id].score += 0.15
             candidates[seed_id].score_parts["edge_coherence"] = (
                 candidates[seed_id].score_parts.get("edge_coherence", 0.0) + 0.15
             )
-
-
-def _expandable_role(edge: HyperEdge, node_id: str) -> bool:
-    role = edge.roles.get(node_id, "")
-    return role in {
-        "derived_fact",
-        "state_fact",
-        "evidence_event",
-        "time_member",
-        "topic_evidence",
-        "preference_evidence",
-    }

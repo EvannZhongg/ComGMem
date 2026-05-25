@@ -73,6 +73,10 @@ def test_memory_extraction_accepts_nodes_and_edge_summaries():
             "edge_summaries": [],
         },
         {
+            "nodes": [{"ref": "n1", "canonical_text": "Alice", "time": "2024-01-03"}],
+            "edge_summaries": [],
+        },
+        {
             "nodes": [],
             "edge_summaries": [{"ref": "e1", "description": "A relation.", "edge_type": "state"}],
         },
@@ -121,6 +125,8 @@ def test_hyper_edge_core_schema_no_longer_exposes_polarity_or_roles():
 
     assert "polarity" not in fields
     assert "roles" not in fields
+    assert "edge_type" not in fields
+    assert "relation" not in fields
     assert {"description", "node_ids", "metadata"} <= fields
 
 
@@ -202,6 +208,7 @@ def test_llm_memory_extractor_prompt_and_parser_use_nodes_and_edge_summaries():
     assert extraction.nodes[0].canonical_text == "Alice prefers morning interviews."
     assert '"nodes", "edge_summaries"' in llm.prompts[0]
     assert "Do not output sources, source_ref, source_refs" in llm.prompts[0]
+    assert "polarity, nodes[].time, confidence" in llm.prompts[0]
     assert "Use `nodes` as the only carrier" in llm.prompts[0]
     assert '"entities", "events", "assertions"' not in llm.prompts[0]
 

@@ -252,7 +252,6 @@ class Memory:
         self._index_nodes_and_clusters(output.nodes, output.edge_clusters)
         self.store.upsert_edge_cluster_members(output.edge_cluster_members)
         self.store.upsert_entity_aliases(output.entity_aliases)
-        self.store.upsert_fact_properties(output.fact_properties)
 
     def _delete_retired_vectors(self, nodes: list[Any]) -> None:
         if not nodes:

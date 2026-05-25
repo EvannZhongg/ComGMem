@@ -1,60 +1,51 @@
 turn:
   enabled: true
   description: "Raw conversation turns or message spans that preserve source text, speaker role, order, and provenance for later evidence tracing."
-  time: {prefer_world_time: true}
   indexing: {lexical: true, vector: true, time_index: true}
 
 node_labels:
   unconfigured_label_policy:
     description: "The configured labels are preferences, not a closed whitelist. If a reusable memory object does not fit them, emit a concise semantic label that names what the memory is."
-    local_graph: {enabled: true, allow_triples: true, allow_attributes: true, allow_roles: true}
+    local_graph: {enabled: true, allow_triples: true, allow_attributes: true}
     indexing: {lexical: true, vector: true}
   entity:
     enabled: true
     description: "Named or referential objects that can be reused across memories, such as people, organizations, places, projects, products, files, tools, and other referents that may appear again."
     alias_resolution: true
-    local_graph: {enabled: true, allow_triples: true, allow_attributes: true, allow_roles: true}
+    local_graph: {enabled: true, allow_triples: true, allow_attributes: true}
     indexing: {lexical: true, vector: true, alias_index: true}
   fact:
     enabled: true
     description: "Atomic assertions or claims that may be queried, updated, contradicted, or supported by evidence, such as preferences, states, relationships, decisions, plans, or outcomes."
-    property_index: true
-    local_graph: {enabled: true, allow_triples: true, allow_attributes: true, allow_roles: true}
+    local_graph: {enabled: true, allow_triples: true, allow_attributes: true}
     indexing: {lexical: true, vector: true}
   state:
     enabled: true
     description: "A subject's state over a time range, such as location, role, ownership, relationship, health, availability, progress, or other mutable condition."
-    property_index: true
-    time: {prefer_world_time: true}
-    local_graph: {enabled: true, allow_triples: true, allow_attributes: true, allow_roles: true}
+    local_graph: {enabled: true, allow_triples: true, allow_attributes: true}
     indexing: {lexical: true, vector: true, time_index: true}
   preference:
     enabled: true
     description: "Long-term preferences, tendencies, habits, tastes, stable profile details, or recurring choices that should be reused across conversations."
-    property_index: true
-    local_graph: {enabled: true, allow_triples: true, allow_attributes: true, allow_roles: true}
+    local_graph: {enabled: true, allow_triples: true, allow_attributes: true}
     indexing: {lexical: true, vector: true}
   task:
     enabled: true
     description: "Plans, goals, tasks, deadlines, TODO items, commitments, progress updates, blockers, outcomes, or next actions."
-    property_index: true
-    time: {prefer_world_time: true}
-    local_graph: {enabled: true, allow_triples: true, allow_attributes: true, allow_roles: true}
+    local_graph: {enabled: true, allow_triples: true, allow_attributes: true}
     indexing: {lexical: true, vector: true, time_index: true}
   event:
     enabled: true
     description: "Time-bound interactions, actions, observations, or episodes in a conversation, real-world timeline, tool run, meeting, task step, or observation."
-    time: {prefer_world_time: true}
-    local_graph: {enabled: true, allow_triples: true, allow_attributes: true, allow_roles: true}
+    local_graph: {enabled: true, allow_triples: true, allow_attributes: true}
     indexing: {lexical: true, vector: true, time_index: true}
   instruction:
     enabled: true
     description: "User-provided rules, constraints, or behavioral requirements that the Agent should follow across turns. Current version treats this as a normal node label; future retrieval policy may prioritize it or place it near the top of the System Prompt."
-    local_graph: {enabled: true, allow_triples: true, allow_attributes: true, allow_roles: true}
+    local_graph: {enabled: true, allow_triples: true, allow_attributes: true}
     indexing: {lexical: true, vector: true}
   tool:
     enabled: false
     description: "Tool calls, tool results, observations, or external execution artifacts from a real agent run."
-    time: {prefer_world_time: true}
-    local_graph: {enabled: true, allow_triples: true, allow_attributes: true, allow_roles: true}
+    local_graph: {enabled: true, allow_triples: true, allow_attributes: true}
     indexing: {lexical: true, vector: false}

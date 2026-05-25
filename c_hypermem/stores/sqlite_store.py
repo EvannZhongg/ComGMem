@@ -10,7 +10,6 @@ from c_hypermem.schema import (
     EdgeCluster,
     EdgeClusterMember,
     EntityAliasIndexEntry,
-    FactPropertyIndexEntry,
     HyperEdge,
     LocalNodeGraph,
     Message,
@@ -40,7 +39,6 @@ class SQLiteStore:
                 "hyper_edges",
                 "nodes_fts",
                 "nodes",
-                "fact_property_index",
                 "entity_alias_index",
                 "turns",
             ]:
@@ -139,10 +137,10 @@ class SQLiteStore:
                         """
                         INSERT INTO triples (
                             namespace, triple_id, owner_node_id, subject, predicate, object,
-                            status, scope_edge_id, scope_cluster_id, role_in_edge, edge_relation,
+                            status, scope_edge_id, scope_cluster_id,
                             superseded_by, invalidated_by, qualifiers_json, metadata_json
                         )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ON CONFLICT(namespace, triple_id) DO UPDATE SET
                             owner_node_id = excluded.owner_node_id,
                             subject = excluded.subject,
@@ -151,8 +149,6 @@ class SQLiteStore:
                             status = excluded.status,
                             scope_edge_id = excluded.scope_edge_id,
                             scope_cluster_id = excluded.scope_cluster_id,
-                            role_in_edge = excluded.role_in_edge,
-                            edge_relation = excluded.edge_relation,
                             superseded_by = excluded.superseded_by,
                             invalidated_by = excluded.invalidated_by,
                             qualifiers_json = excluded.qualifiers_json,
@@ -168,8 +164,6 @@ class SQLiteStore:
                             triple.status,
                             triple.scope_edge_id,
                             triple.scope_cluster_id,
-                            triple.role_in_edge,
-                            triple.edge_relation,
                             triple.superseded_by,
                             triple.invalidated_by,
                             _to_json(triple.qualifiers),
@@ -181,21 +175,18 @@ class SQLiteStore:
         with self.conn:
             for edge in edges:
                 if not edge.member_signature:
-                    edge.member_signature = make_member_signature(edge.node_ids, edge.roles)
+                    edge.member_signature = make_member_signature(edge.node_ids)
                 self.conn.execute(
                     """
                     INSERT INTO hyper_edges (
-                        namespace, edge_id, edge_fingerprint, edge_type, relation, description,
-                        polarity, status, member_policy, member_signature, member_version,
+                        namespace, edge_id, edge_fingerprint, description,
+                        status, member_policy, member_signature, member_version,
                         absolute_time_json, relative_time_json, metadata_json
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(namespace, edge_id) DO UPDATE SET
                         edge_fingerprint = excluded.edge_fingerprint,
-                        edge_type = excluded.edge_type,
-                        relation = excluded.relation,
                         description = excluded.description,
-                        polarity = excluded.polarity,
                         status = excluded.status,
                         member_policy = excluded.member_policy,
                         member_signature = excluded.member_signature,
@@ -208,10 +199,7 @@ class SQLiteStore:
                         edge.namespace,
                         edge.edge_id,
                         edge.edge_fingerprint,
-                        edge.edge_type,
-                        edge.relation,
                         edge.description,
-                        edge.polarity,
                         edge.status,
                         edge.member_policy,
                         edge.member_signature,
@@ -233,14 +221,13 @@ class SQLiteStore:
                 for node_id in edge.node_ids:
                     self.conn.execute(
                         """
-                        INSERT INTO hyper_edge_members (namespace, edge_id, node_id, role, weight)
-                        VALUES (?, ?, ?, ?, ?)
+                        INSERT INTO hyper_edge_members (namespace, edge_id, node_id, weight)
+                        VALUES (?, ?, ?, ?)
                         """,
                         (
                             edge.namespace,
                             edge.edge_id,
                             node_id,
-                            edge.roles.get(node_id),
                             edge.weights.get(node_id, 1.0),
                         ),
                     )
@@ -451,65 +438,6 @@ class SQLiteStore:
             updated_at=row["updated_at"],
         )
 
-    def upsert_fact_properties(self, properties: list[FactPropertyIndexEntry]) -> None:
-        with self.conn:
-            for item in properties:
-                self.conn.execute(
-                    """
-                    INSERT INTO fact_property_index (
-                        namespace, property_key, subject_node_id, predicate, fact_node_id, status, updated_at
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(namespace, property_key, fact_node_id) DO UPDATE SET
-                        subject_node_id = excluded.subject_node_id,
-                        predicate = excluded.predicate,
-                        status = excluded.status,
-                        updated_at = excluded.updated_at
-                    """,
-                    (
-                        item.namespace,
-                        item.property_key,
-                        item.subject_node_id,
-                        item.predicate,
-                        item.fact_node_id,
-                        item.status,
-                        item.updated_at or utc_now_iso(),
-                    ),
-                )
-
-    def find_fact_properties(
-        self,
-        namespace: str,
-        property_key: str,
-        status: str | None = "active",
-    ) -> list[FactPropertyIndexEntry]:
-        params: list[Any] = [namespace, property_key]
-        status_filter = ""
-        if status is not None:
-            status_filter = "AND status = ?"
-            params.append(status)
-        rows = self.conn.execute(
-            f"""
-            SELECT *
-            FROM fact_property_index
-            WHERE namespace = ? AND property_key = ? {status_filter}
-            ORDER BY updated_at DESC
-            """,
-            params,
-        ).fetchall()
-        return [
-            FactPropertyIndexEntry(
-                namespace=row["namespace"],
-                property_key=row["property_key"],
-                subject_node_id=row["subject_node_id"],
-                predicate=row["predicate"],
-                fact_node_id=row["fact_node_id"],
-                status=row["status"],
-                updated_at=row["updated_at"],
-            )
-            for row in rows
-        ]
-
     def list_nodes(self, namespace: str) -> list[MemoryNode]:
         rows = self.conn.execute(
             "SELECT * FROM nodes WHERE namespace = ? ORDER BY rowid",
@@ -665,7 +593,6 @@ class SQLiteStore:
             "edge_clusters": "edge_clusters",
             "edge_cluster_members": "edge_cluster_members",
             "triples": "triples",
-            "fact_properties": "fact_property_index",
             "entity_aliases": "entity_alias_index",
             "turn_messages": "turns",
         }.items():
@@ -736,10 +663,7 @@ class SQLiteStore:
                         namespace TEXT NOT NULL,
                         edge_id TEXT NOT NULL,
                         edge_fingerprint TEXT NOT NULL,
-                        edge_type TEXT NOT NULL,
-                        relation TEXT NOT NULL,
                         description TEXT NOT NULL DEFAULT '',
-                        polarity TEXT NOT NULL DEFAULT 'unknown',
                         status TEXT NOT NULL DEFAULT 'active',
                         member_policy TEXT NOT NULL DEFAULT 'immutable',
                         member_signature TEXT NOT NULL DEFAULT '',
@@ -750,9 +674,6 @@ class SQLiteStore:
                         PRIMARY KEY (namespace, edge_id)
                     );
 
-                    CREATE INDEX IF NOT EXISTS idx_hyper_edges_namespace_type
-                        ON hyper_edges(namespace, edge_type);
-
                     CREATE INDEX IF NOT EXISTS idx_hyper_edges_namespace_fingerprint
                         ON hyper_edges(namespace, edge_fingerprint);
 
@@ -760,7 +681,6 @@ class SQLiteStore:
                         namespace TEXT NOT NULL,
                         edge_id TEXT NOT NULL,
                         node_id TEXT NOT NULL,
-                        role TEXT,
                         weight REAL NOT NULL DEFAULT 1.0
                     );
 
@@ -807,8 +727,6 @@ class SQLiteStore:
                         status TEXT NOT NULL DEFAULT 'active',
                         scope_edge_id TEXT,
                         scope_cluster_id TEXT,
-                        role_in_edge TEXT,
-                        edge_relation TEXT,
                         superseded_by TEXT,
                         invalidated_by TEXT,
                         qualifiers_json TEXT NOT NULL,
@@ -824,20 +742,6 @@ class SQLiteStore:
 
                     CREATE INDEX IF NOT EXISTS idx_triples_scope_cluster
                         ON triples(namespace, scope_cluster_id);
-
-                    CREATE TABLE IF NOT EXISTS fact_property_index (
-                        namespace TEXT NOT NULL,
-                        property_key TEXT NOT NULL,
-                        subject_node_id TEXT,
-                        predicate TEXT NOT NULL,
-                        fact_node_id TEXT NOT NULL,
-                        status TEXT NOT NULL DEFAULT 'active',
-                        updated_at TEXT NOT NULL,
-                        PRIMARY KEY (namespace, property_key, fact_node_id)
-                    );
-
-                    CREATE INDEX IF NOT EXISTS idx_fact_property_lookup
-                        ON fact_property_index(namespace, property_key, status);
 
                     CREATE TABLE IF NOT EXISTS entity_alias_index (
                         namespace TEXT NOT NULL,
@@ -911,22 +815,17 @@ def _node_from_row(row: sqlite3.Row) -> MemoryNode:
 
 def _edge_from_row(row: sqlite3.Row, members: list[sqlite3.Row]) -> HyperEdge:
     node_ids = [member["node_id"] for member in members]
-    roles = {member["node_id"]: member["role"] for member in members if member["role"] is not None}
     weights = {member["node_id"]: float(member["weight"]) for member in members}
     return HyperEdge(
         edge_id=row["edge_id"],
         namespace=row["namespace"],
         edge_fingerprint=row["edge_fingerprint"],
-        edge_type=row["edge_type"],
-        relation=row["relation"],
         description=row["description"],
-        polarity=row["polarity"],
         status=row["status"],
         member_policy=row["member_policy"],
         member_signature=row["member_signature"],
         member_version=int(row["member_version"]),
         node_ids=node_ids,
-        roles=roles,
         weights=weights,
         time=_time_from_columns(row["absolute_time_json"], row["relative_time_json"]),
         metadata=_from_json(row["metadata_json"], {}),
@@ -986,7 +885,7 @@ def _message_from_turn_row(row: sqlite3.Row) -> Message:
 def _edge_members(conn: sqlite3.Connection, namespace: str, edge_id: str) -> list[sqlite3.Row]:
     return conn.execute(
         """
-        SELECT node_id, role, weight
+        SELECT node_id, weight
         FROM hyper_edge_members
         WHERE namespace = ? AND edge_id = ?
         ORDER BY rowid

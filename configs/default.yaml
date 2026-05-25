@@ -40,13 +40,8 @@ hyperedges:
   build_from_extraction: true
   merge_policy: conservative
   member_policy_default: appendable
-  basic_edge_types:
-    - evidence
-    - state
-    - correction
   resolution:
     use_member_overlap_as_recall_signal: true
-    require_relation_role_polarity_compatibility_for_merge: true
 
 edge_clusters:
   enabled: true

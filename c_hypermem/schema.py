@@ -55,8 +55,6 @@ class LocalTriple(BaseModel):
     status: MemoryStatus = "active"
     scope_edge_id: str | None = None
     scope_cluster_id: str | None = None
-    role_in_edge: str | None = None
-    edge_relation: str | None = None
     superseded_by: str | None = None
     invalidated_by: str | None = None
     qualifiers: dict[str, Any] = Field(default_factory=dict)
@@ -75,41 +73,6 @@ class ExtractedTriple(BaseModel):
     qualifiers: dict[str, Any] = Field(default_factory=dict)
 
 
-class ExtractedEntity(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    name: str
-    entity_type: str | None = Field(default=None, alias="type")
-    labels: list[str] = Field(default_factory=list)
-    aliases: list[str] = Field(default_factory=list)
-    source_ref: str | None = None
-    attributes: dict[str, Any] = Field(default_factory=dict)
-
-
-class EventParticipant(BaseModel):
-    name: str
-    role: str | None = None
-
-
-class ExtractedEvent(BaseModel):
-    summary: str
-    time: str | None = None
-    participants: list[EventParticipant] = Field(default_factory=list)
-    labels: list[str] = Field(default_factory=list)
-    source_ref: str | None = None
-    attributes: dict[str, Any] = Field(default_factory=dict)
-
-
-class ExtractedAssertion(BaseModel):
-    subject: str
-    predicate: str
-    object: str
-    source_ref: str | None = None
-    time: str | None = None
-    labels: list[str] = Field(default_factory=list)
-    attributes: dict[str, Any] = Field(default_factory=dict)
-
-
 class ExtractedNode(BaseModel):
     model_config = _EXTRA_FORBID
 
@@ -119,7 +82,6 @@ class ExtractedNode(BaseModel):
     summaries: list[str] = Field(default_factory=list)
     triples: list[ExtractedTriple] = Field(default_factory=list)
     edge_summary_refs: list[str] = Field(default_factory=list)
-    time: str | dict[str, Any] | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
@@ -210,8 +172,6 @@ class HyperEdge(BaseModel):
     edge_id: str
     namespace: str
     edge_fingerprint: str
-    edge_type: str
-    relation: str
     description: str = ""
     status: MemoryStatus = "active"
     member_policy: MemberPolicy = "immutable"
@@ -256,16 +216,6 @@ class EntityAliasIndexEntry(BaseModel):
     entity_type: str | None = None
     node_id: str
     source_count: int = 1
-    updated_at: str | None = None
-
-
-class FactPropertyIndexEntry(BaseModel):
-    namespace: str
-    property_key: str
-    subject_node_id: str | None = None
-    predicate: str
-    fact_node_id: str
-    status: MemoryStatus = "active"
     updated_at: str | None = None
 
 
@@ -330,7 +280,6 @@ class IngestionOutput(BaseModel):
     edge_clusters: list[EdgeCluster] = Field(default_factory=list)
     edge_cluster_members: list[EdgeClusterMember] = Field(default_factory=list)
     entity_aliases: list[EntityAliasIndexEntry] = Field(default_factory=list)
-    fact_properties: list[FactPropertyIndexEntry] = Field(default_factory=list)
 
 
 class SearchResult(BaseModel):

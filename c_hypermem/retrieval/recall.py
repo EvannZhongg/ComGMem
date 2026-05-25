@@ -91,10 +91,7 @@ class Retriever:
             "query_analysis": analysis_metadata,
             "edge_id": edge.edge_id,
             "hyper_edge_ids": [edge.edge_id],
-            "edge_type": edge.edge_type,
-            "edge_relation": edge.relation,
             "edge_description": edge.description,
-            "edge_roles": edge.roles,
             "edge_node_ids": edge.node_ids,
             "channels": sorted({channel for node in ranked_edge.nodes for channel in node.channels}),
             "hit_node_ids": sorted(ranked_edge.hit_node_ids),
@@ -135,4 +132,4 @@ class Retriever:
     def _edge_content(self, ranked_edge: RankedEdge) -> str:
         edge = ranked_edge.edge
         node_lines = "\n".join(f"- {item.node.content}" for item in ranked_edge.nodes)
-        return f"[{edge.edge_type}] {edge.description}\nNodes:\n{node_lines}"
+        return f"{edge.description}\nNodes:\n{node_lines}"

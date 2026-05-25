@@ -19,7 +19,7 @@
 - LLM 不输出 `edge_type`、`relation`、`roles`。
 - HyperEdge 核心只保留 `description + node_ids + metadata`；来源由系统根据当前 user/assistant 交互的 `turn_id` 写入 MemoryNode / HyperEdge metadata，例如 `source_turn_ids`。
 - `nodes[]` 和 LLM 输出的 `edge_summaries[]` 都不承载 `source_refs`；真实交互来源由系统在组装 HyperEdge 时绑定，再由 HyperEdge 解释哪些节点在该交互中被共同关联。
-- 系统内部可选推断 `metadata.inferred_edge_type` 和 `metadata.inferred_relation`，作为检索、维护或分析策略缓存，而不是超边成立条件。
+- 不再保留系统内部 `edge_type/relation` 列或 schema 字段；若后续需要分析型边分类，只能作为普通 metadata 另行设计，并且不能成为抽取主路径字段。
 
 ## 2. 设计参考
 
@@ -29,7 +29,7 @@
 | --- | --- | --- |
 | 共享节点池 | `## 2. 共享节点池` | `MemoryNode` 统一结构，标签同级，node identity 不依赖 label。 |
 | ID 生成 | `## 3. ID 生成原则` | LLM 只输出临时 ref；系统生成 `node_id/edge_id/triple_id`。 |
-| 高阶边 | `## 4. 高阶边` | HyperEdge 核心由 description 和成员节点构成；`edge_type/relation` 只允许系统可选推断。 |
+| 高阶边 | `## 4. 高阶边` | HyperEdge 核心由 description 和成员节点构成；不保留 `edge_type/relation` schema 或 DB 列。 |
 | 一次抽取 | `## 5. 一次抽取，系统组装` | 抽取输出改为 `nodes / edge_summaries`；来源由系统绑定当前 `turn_id`。 |
 | 复合节点 | `## 6. 复合节点` | 任意 label 的 node 都可以拥有 triples；不再为不同 label 定制 local graph schema。 |
 | 时间模型 | `## 7. 双时间指标` | 节点和边仍保留 world/lifecycle/activation 时间；重构不删除时间层。 |
@@ -62,7 +62,6 @@
   - `summaries`
   - `triples`
   - `edge_summary_refs`
-  - `time`
   - `metadata`
 - 新增 `ExtractedEdgeSummary`，字段建议包括：
   - `ref`
@@ -153,7 +152,6 @@ ExtractedEdgeSummary + member nodes -> HyperEdge(description, node_ids)
 - 删除默认写死的：
   - `event -> facts evidence edge`
   - `subject entity + fact state edge`
-- `correction` 仍可保留为系统维护生成的特殊边，但它不来自 LLM `edge_type`。
 - EdgeClusterBuilder 不再依赖 `edge.edge_type == state/correction`。应改为基于：
   - edge description
   - member node labels
@@ -200,18 +198,16 @@ ExtractedEdgeSummary + member nodes -> HyperEdge(description, node_ids)
 需要调整：
 
 - `nodes.local_graph_json` 新写入不产生 `attributes/roles`。
-- `triples.role_in_edge` 可以废弃或保留为空；新的 scope 信息优先进入 qualifiers：
+- `triples.role_in_edge` 已删除；新的 scope 信息优先进入 qualifiers：
 
 ```json
 {"scope_edge_id": "...", "scope_cluster_id": "...", "edge_description": "..."}
 ```
 
-- `hyper_edges.polarity` 废弃或保留为空/unknown。
-- `hyper_edge_members.role` 废弃或保留为空。
-- `fact_property_index` 需要重新评估：
-  - 新设计可改为更通用的 `node_property_index` 或 `triple_property_index`。
-- 需要数据库迁移策略：
-  - 开发期可 reset namespace。
+- `hyper_edges.polarity` 已删除。
+- `hyper_edge_members.role` 已删除。
+- `fact_property_index` 已删除；当前不实现旧 fact/property 兼容索引。
+- 当前仍为开发环境，不需要旧数据迁移或兼容。
 
 ### 3.7 向量索引
 
@@ -224,7 +220,8 @@ ExtractedEdgeSummary + member nodes -> HyperEdge(description, node_ids)
 
 - `node_local_graph_embedding_text()` 继续可用，但文案应从 `Related facts` 改为 `Related triples` 或 `Local graph`。
 - payload 中 `attributes` 可保留为 node-level system attributes，但不再读取 local graph attributes。
-- payload 中 `role_in_edge` 可废弃或保留为空。
+- payload 中 `role_in_edge` 已删除。
+- `turn_dialogue` payload 中的对话角色字段已改名为 `dialogue_roles`，避免和旧 HyperEdge roles 混淆。
 - Edge summary / HyperEdge description 可以考虑增加独立向量索引：
   - 当前已有 EdgeCluster canonical/variant 向量。
   - 重构后可新增 `hyper_edge_description` collection，或先继续只索引 EdgeCluster。
@@ -271,15 +268,7 @@ ExtractedEdgeSummary + member nodes -> HyperEdge(description, node_ids)
   - time preference
   - merge/conflict strategy
   - retrieval priority
-- 增加可选 inferred edge metadata 配置：
-
-```yaml
-hyperedges:
-  infer_edge_metadata: false
-  inferred_fields:
-    - inferred_edge_type
-    - inferred_relation
-```
+- 当前不增加 inferred edge metadata 配置；`edge_type/relation` 不作为 schema、DB 列或 prompt 输出字段。
 
 ### 3.10 测试与示例
 
@@ -318,9 +307,9 @@ hyperedges:
 | 0 | 设计文档对齐 | 已开始 | 明确同构节点、description-only edge、可选 inferred metadata。 | `docs/hypergraph_memory_architecture.md`, 本文档 |
 | 1 | Schema 引入新结构 | 已完成 | 增加 `ExtractedNode/ExtractedEdgeSummary`，删除旧抽取 schema 主路径。 | `schema.py` |
 | 2 | 抽取 prompt 与 parser 重构 | 已完成 | LLM 输出 `nodes/edge_summaries`，禁止输出来源字段。 | `memory_extraction.md`, `extraction.py` |
-| 3 | NodeBuilder 与 LocalGraphBuilder 重构 | 未开始 | 统一 `build_node`，删除按 label 写死 triples 的主路径。 | `node_builder.py`, `local_graph_builder.py` |
-| 4 | GraphAssembler 重构 | 未开始 | 按 refs 组装 nodes 和 HyperEdges，并从 context.turn_ids 写入系统来源 metadata。 | `assembly.py`, `node_builder.py`, `hyperedge_builder.py` |
-| 5 | 存储与索引调整 | 未开始 | 新写入不依赖 polarity/roles；来源回溯依赖系统注入的 `source_turn_ids`。 | `sqlite_store.py`, `vector_store.py` |
+| 3 | NodeBuilder 与 LocalGraphBuilder 重构 | 已完成 | 统一 `build_node`，删除按 label 写死 triples 的主路径。 | `node_builder.py`, `local_graph_builder.py` |
+| 4 | GraphAssembler 重构 | 已完成 | 按 refs 组装 nodes 和 HyperEdges，并从 context.turn_ids 写入系统来源 metadata。 | `assembly.py`, `node_builder.py`, `hyperedge_builder.py` |
+| 5 | 存储与索引调整 | 已完成 | 新写入不依赖 polarity/roles；来源回溯依赖系统注入的 `source_turn_ids`。 | `sqlite_store.py`, `vector_store.py` |
 | 6 | 维护逻辑泛化 | 未开始 | fact merge/conflict 泛化为 memory node merge/conflict。 | `maintenance.py`, maintenance prompts |
 | 7 | 检索适配 | 未开始 | 检索不依赖 edge_type/relation/roles，消费 description-only edge。 | `retrieval/*.py` |
 | 8 | 配置收敛 | 未开始 | node label policy 与 inferred metadata 配置落地。 | `config.py`, `configs/*.yaml` |
@@ -354,8 +343,11 @@ hyperedges:
 - 已完成：本文档新增，列出重构顺序和影响模块。
 - 已完成：代码 schema 重构，`MemoryExtraction` 主入口已切换为 `nodes/edge_summaries/metadata`，schema 层拒绝旧抽取 shape 与 LLM 来源/typed-edge 字段。
 - 已完成：抽取 prompt 和 parser 重构，`memory_extraction.md` 只要求 `nodes/edge_summaries`，`normalize_extraction_payload()` 不再接受或映射 `entities/events/assertions/sources`。
-- 已删除：`ExtractedSource`。
-- 暂时遗留待后续阶段删除：`ExtractedEntity`、`ExtractedEvent`、`EventParticipant`、`ExtractedAssertion`。这些类已不在抽取主路径中，但仍被旧 `assembly/node_builder/local_graph_builder/entity_resolution/maintenance` 引用；阶段 3-6 迁移到 `ExtractedNode` 后应立即删除。
-- 未开始：写入、维护、存储、检索适配。
+- 已完成：`NodeBuilder.build_node()` 消费 `ExtractedNode`，`LocalGraphBuilder` 只规范化和去重 node 内 triples，不再按 event/fact/entity 写死 triples。
+- 已完成：`GraphAssembler` 按 `edge_summary_refs` 反向组装 description-only HyperEdge，并从 `context.metadata.turn_ids` 写入 MemoryNode / HyperEdge metadata 的 `source_turn_ids`。
+- 已删除：`ExtractedSource`、`ExtractedEntity`、`ExtractedEvent`、`EventParticipant`、`ExtractedAssertion`。
+- 已删除：旧 `entity_resolution.py` 和旧 fact-oriented `GraphMaintenance` 主体。当前 `GraphMaintenance` 只保留新写入路径的 post-assembly hook。
+- 已完成：存储与索引调整。SQLite 新 schema 不再创建旧 `edge_type/relation/polarity/role/role_in_edge/edge_relation/fact_property_index` 路径；向量 payload 清理旧 edge role 字段，turn dialogue payload 使用 `dialogue_roles`。
+- 未开始：维护逻辑泛化、旧测试迁移、示例迁移。
 
-下一步建议进入 **阶段 3：NodeBuilder 与 LocalGraphBuilder 重构**，让主写入路径开始消费 `ExtractedNode`。
+下一步建议进入 **阶段 6：维护逻辑泛化**，将旧 fact/property/role/polarity prompt 泛化为统一 MemoryNode 和 description-only HyperEdge 维护。

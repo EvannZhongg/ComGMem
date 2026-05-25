@@ -264,7 +264,7 @@ def node_local_graph_embedding_text(node: MemoryNode) -> str:
 
     triples = [triple for triple in node.local_graph.triples if triple.triple_id is not None]
     if triples:
-        lines.append("Related facts:")
+        lines.append("Local graph:")
         for triple in triples:
             text = triple_embedding_text(triple)
             if text:
@@ -304,8 +304,6 @@ def collect_node_local_graph_index_items(nodes: Sequence[MemoryNode]) -> list[No
                     "status": triple.status,
                     "scope_edge_id": triple.scope_edge_id,
                     "scope_cluster_id": triple.scope_cluster_id,
-                    "role_in_edge": triple.role_in_edge,
-                    "edge_relation": triple.edge_relation,
                     "superseded_by": triple.superseded_by,
                     "invalidated_by": triple.invalidated_by,
                     "qualifiers": triple.qualifiers,
@@ -408,7 +406,7 @@ def collect_turn_dialogue_index_item(
         "item_type": "turn_dialogue",
         "turn_id": turn_id,
         "turn_index": turn_index,
-        "roles": [
+        "dialogue_roles": [
             _turn_dialogue_role_label(message.role)
             for message in messages
             if _turn_dialogue_role_label(message.role) is not None and message.content.strip()

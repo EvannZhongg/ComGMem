@@ -6,7 +6,6 @@ from c_hypermem.schema import (
     EdgeCluster,
     EdgeClusterMember,
     EntityAliasIndexEntry,
-    FactPropertyIndexEntry,
     HyperEdge,
     Message,
     MemoryNode,
@@ -67,15 +66,6 @@ class MemoryStore(Protocol):
         normalized_aliases: list[str],
         entity_type: str | None = None,
     ) -> EntityAliasIndexEntry | None: ...
-
-    def upsert_fact_properties(self, properties: list[FactPropertyIndexEntry]) -> None: ...
-
-    def find_fact_properties(
-        self,
-        namespace: str,
-        property_key: str,
-        status: str | None = "active",
-    ) -> list[FactPropertyIndexEntry]: ...
 
     def stats(self, namespace: str) -> dict[str, int]: ...
 

@@ -29,16 +29,16 @@
 核心 schema 位于 `c_hypermem/schema.py`：
 
 - `MemoryNode`：统一节点结构，使用 `node_labels` 表达语义类型。
-- `HyperEdge`：具体高阶关系实例，核心字段已收敛到 description、member node ids、metadata、time/status/member policy 等；`polarity/roles` 已不再是 Pydantic schema 核心字段。
+- `HyperEdge`：具体高阶关系实例，核心字段已收敛到 description、member node ids、metadata、time/status/member policy 等；`edge_type/relation/polarity/roles` 已不再是 Pydantic schema 核心字段。
 - `EdgeCluster`：相关 HyperEdge 的聚合工作集，不强制合并边。
 - `LocalNodeGraph`：所有节点共享的局部图结构，只包含统一 triples；旧 `attributes/roles` 已从 schema 移除。
-- `ExtractedNode`：新的抽取节点候选，包含 `ref/labels/canonical_text/summaries/triples/edge_summary_refs/time/metadata`。
+- `ExtractedNode`：新的抽取节点候选，包含 `ref/labels/canonical_text/summaries/triples/edge_summary_refs/metadata`。节点构建时间由系统写入，不由 LLM 输出。
 - `ExtractedEdgeSummary`：新的抽取边摘要候选，包含 `ref/description/metadata`。
 - `MemoryExtraction`：LLM 一次抽取输出主入口已切换为 `nodes/edge_summaries/metadata`；旧 `entities/events/assertions/sources` 不再是主抽取 schema 字段。
 
-Schema 层当前会拒绝旧抽取 shape，以及 LLM 输出的 `sources/source_refs/source_ref/edge_type/relation/polarity/roles` 等不应由模型生成的来源或 typed-edge 字段。系统 ID 由 `utils/ids.py` 生成，LLM 不生成 `node_id/edge_id/triple_id`。
+Schema 层当前会拒绝旧抽取 shape，以及 LLM 输出的 `sources/source_refs/source_ref/edge_type/relation/polarity/roles/time` 等不应由模型生成的来源、typed-edge 或构建时间字段。系统 ID 由 `utils/ids.py` 生成，LLM 不生成 `node_id/edge_id/triple_id`。
 
-注意：当前已完成阶段 1-2。写入 builder、assembly、存储和检索仍处在旧实现迁移前状态，后续阶段会逐步改为消费 `nodes/edge_summaries`。
+注意：当前已完成阶段 1-5 的主路径。维护 prompt 泛化、旧测试迁移和示例迁移仍会在后续阶段继续清理。
 
 ## 4. 写入 Pipeline
 
@@ -62,32 +62,21 @@ Memory.add_memory/add
   - `add_memory(...)` 每次把当前 interaction 作为 target；`add(messages)` 会按消息顺序逐条模拟增量 target。
 - `node_labels.yaml` 的启用标签描述会注入抽取 prompt 的 `{{NODE_LABELS}}`。
 - 抽取 prompt 已切换为 `nodes/edge_summaries`。`pipeline/extraction.py` 的 `normalize_extraction_payload()` 只接受该新结构，并严格拒绝旧 `entities/events/assertions/sources` 与模型输出来源字段。
-- `assertions` 是当前构建事实节点的主输入：每条 assertion 会转为 `fact` 节点、LocalNodeGraph triple、property index 和基础超边成员。
+- `nodes` 是当前构建 MemoryNode 的唯一主输入。每个 `ExtractedNode` 会转为统一 `MemoryNode`，node 内 triples 只来自模型输出的 `nodes[].triples`。
+- `ExtractedNode` 不接受 `time` 字段；所有节点和边的 `time.world.event_time/source_timestamp/valid_time.start` 默认写入系统构建时 UTC 时间，和 node label 无关。
 - 原始交互消息不写入 `nodes`；`Memory` 会先写入独立 `turns` 表，再把当前 `turn_id` 放入 `metadata.turn_ids`，GraphAssembler 组装出的节点和边会在 metadata 中带上 `source_turn_ids`。
 - `add_memory(...)` 中同一次交互的 user / assistant 消息共享同一个 `turn_id`；`turns` 表仍按消息行保存，但写入侧会额外把该 `turn_id` 下的 User Prompt 与 Assistant Output 拼成一段完整对话日志，写入独立的 `turn_dialogue` 向量索引。Observation / tool 日志不进入该 turn dialogue 向量。
 - `GraphAssembler` 负责系统组装：
-  - 编排 `EntityResolver` 做轻量 entity alias resolution。
-  - 编排 `NodeBuilder` 构建或复用 `entity/event/fact` 节点。
-  - 编排 `LocalGraphBuilder` 为 event/entity/fact 构建统一 LocalNodeGraph。
-  - 对 preference 谓词追加 `preference` 标签。
-  - 编排 `BasicHyperEdgeBuilder` 构建基础 `evidence/state/correction` HyperEdge。
-  - 编排 `BasicEdgeClusterBuilder` 按 topic fingerprint 复用或创建 EdgeCluster，并追加 cluster members。
-  - 写入 entity alias index 和 fact property index。
-- 简单冲突事实处理已移入 `GraphMaintenance.retire_conflicting_facts(...)`：
-  - 同一 subject node + predicate 下存在旧 fact 时，调用 `maintenance.contradiction_check` 交由 LLM 判断 `same_value/compatible/contradiction/uncertain`。
-  - 只有 LLM 判定为 `contradiction` 且建议旧 fact `retired/invalidated` 时，旧 fact 才会被退役。
-  - 创建 `correction` HyperEdge。
-  - 同步退役旧 fact property index 行。
+  - 编排 `NodeBuilder.build_node()` 构建或复用同构 `MemoryNode`。
+  - 编排 `LocalGraphBuilder` 规范化和去重 `ExtractedNode.triples`。
+  - 根据 `node.edge_summary_refs` 反向收集 HyperEdge 成员。
+  - 编排 `BasicHyperEdgeBuilder.build_from_summary()` 构建 description-only HyperEdge。
+  - 编排 `BasicEdgeClusterBuilder` 按 edge description / optional metadata 复用或创建 EdgeCluster，并追加 cluster members。
+  - 对带 `entity` label 的节点写入 entity alias index；新主路径不再写入 fact property index。
 
 ## 5. 维护 Prompt
 
-`c_hypermem/prompts/maintenance` 已按当前维护编排拆分：
-
-- `fact_merge.md`：property_key 重合后判断 merge/update/keep separate/需要冲突检查。
-- `contradiction_check.md`：处理基础 SPO 冲突。
-- `edge_merge.md`：构建新边时判断复用边、追加成员、新版本或新建边。
-- `edge_conflict_check.md`：边挂载进 Cluster 后更新簇健康/冲突状态。
-- `edge_cluster_merge.md`：后台宏观 Cluster 整理。
+`c_hypermem/prompts/maintenance` 仍保留为后续阶段的 prompt registry 资源。当前主写入路径不调用旧 fact/property/role/polarity 维护 prompt。
 
 `configs/default.yaml` 已配置这些 prompt 路径，并预留：
 
@@ -98,7 +87,7 @@ edge_clusters:
     trigger_every_k_writes: 100
 ```
 
-注意：当前已接入 `contradiction_check.md` 用于同一 property key 下的新旧 fact 判决。其他维护 prompt 仍主要是接口和策略预留，尚未接入主流程。
+注意：旧 `fact_merge.md`、`contradiction_check.md`、`edge_merge.md` 仍带有 property key、relation、roles、polarity 等历史措辞，已不应视为当前主路径契约。阶段 6 应将它们泛化或删除。
 
 ## 6. 存储
 
@@ -111,8 +100,9 @@ edge_clusters:
 - `edge_clusters`
 - `edge_cluster_members`
 - `entity_alias_index`
-- `fact_property_index`
 - `turns`
+
+已直接删除旧 SQLite 主路径和旧表/列依赖；开发期不做旧数据兼容。新 schema 不再创建或写入 `fact_property_index`，也不再在 `hyper_edges`、`hyper_edge_members`、`triples` 中保存旧 `edge_type`、`relation`、`polarity`、member `role`、`role_in_edge`、`edge_relation`。
 
 向量索引当前通过 `c_hypermem/stores/vector_store.py` 接入：
 
@@ -131,7 +121,7 @@ edge_clusters:
 
   ```text
   Core content: Alice prefers morning interviews
-  Related facts:
+  Local graph:
   - Alice prefers morning interviews
   ```
 
@@ -139,8 +129,8 @@ edge_clusters:
 - `node_content` / `node_summary` 向量：索引 `MemoryNode.content` 和 `MemoryNode.summary` 原文，payload 中保留 `node_id/node_labels/status/time/metadata` 等信息。
 - `edge_cluster_canonical` 向量：索引 `EdgeCluster.canonical_description`，payload 中保留 `cluster_id/cluster_labels/conflict_state` 等信息。
 - `edge_cluster_variant` 向量：索引 `EdgeCluster.description_variants` 中的各个描述变体，payload 中保留 `cluster_id/variant_index/source_edge_id` 等信息。`BasicEdgeClusterBuilder` 复用已有 cluster 时会追加新的 description variant，并重新持久化 cluster。
-- `turn_dialogue` 向量：只索引同一个 `turn_id` 下 role 为 `user` 和 `assistant` 的消息，按轮次拼接为完整对话日志，且payload 中必须带 `turn_id` 和 `turn_index`。后续检索命中该向量时，应拿 `turn_id` 回 SQLite `turns` 表提取完整对话，而不是依赖向量库中的文本作为权威上下文。
-- LLM 维护流程退役旧 fact 时，会删除该旧 fact 对应的 node-local-graph、node_content 和 node_summary 向量点，避免退役事实被向量召回。其中 node-local-graph 向量删除显式调用 `self.vector_store.delete(...)`，也就是主 `triple` collection 对应的 vector store。
+- `turn_dialogue` 向量：只索引同一个 `turn_id` 下 role 为 `user` 和 `assistant` 的消息，按轮次拼接为完整对话日志，且 payload 中必须带 `turn_id`、`turn_index` 和 `dialogue_roles`。后续检索命中该向量时，应拿 `turn_id` 回 SQLite `turns` 表提取完整对话，而不是依赖向量库中的文本作为权威上下文。
+- 当节点退役时，会删除该节点对应的 node-local-graph、node_content 和 node_summary 向量点，避免非 active 节点继续被向量召回。其中 node-local-graph 向量删除显式调用主 `triple` collection 对应的 vector store。
 
 ## 7. 检索现状
 
@@ -229,17 +219,17 @@ SearchResult 当前结构要点：
 
 - C-HyperMem 保持独立包边界，不依赖 `agent_memory_eval`。
 - 对外入口收敛到 `Memory.from_config/reset/add/add_memory/search/stats/close`。
-- LLM 只做一次紧凑语义抽取，输出 `entities/events/assertions/sources`，不生成系统 ID、权重或外层图结构。
+- LLM 只做一次紧凑语义抽取，输出 `nodes/edge_summaries`，不生成系统 ID、权重、来源、typed-edge 字段或构建时间。
 - 系统统一生成 `MemoryNode/HyperEdge/EdgeCluster/LocalTriple` ID。
 - `MemoryNode` 使用统一 schema，语义类型通过可累积 `node_labels` 表达。
-- 实体 alias resolution 先于 entity 节点 ID 生成。
+- 带 `entity` label 的节点会使用 canonical_text 和显式 metadata.aliases 建 alias index，用于后续精确复用 entity node。
 - `HyperEdge` 与成员表分离，`EdgeCluster` 聚合相关边但不强制合并边。
 - `LocalNodeGraph` 采用统一结构，基础 triple 已持久化到 `triples` 表。
-- 基础 `evidence/state/correction` HyperEdge 已打通，基础冲突事实退役已通过 `contradiction_check.md` 接入写入流程。
+- description-only HyperEdge 已打通，来源回溯通过系统注入的 `source_turn_ids` 完成。
 
 当前实现仍低于设计文档的部分：
 
-- 维护 prompt 已存在；`contradiction_check` 已接入主流程，但 `fact_merge/edge_merge/edge_conflict_check/edge_cluster_merge` 的 LLM 调用链尚未接入。
+- 维护 prompt 已存在，但旧 fact/property/role/polarity 维护链路不再接入当前主流程；后续需要泛化为 memory node / description-only edge 维护。
 - `state/task/instruction/tool` 已作为标签配置存在，但尚未都有专门构建策略；当前主要依靠 LLM 输出 labels 和统一节点结构承载。`turn` 已从节点标签配置中独立出来，只作为对话记录和来源追踪配置。
 - 检索主流程已接入 node_content、node_summary、node-local-graph 三路向量召回，但尚未接入 EdgeCluster canonical / variant 向量召回，也未接入 turn_dialogue 向量召回。
 - EdgeCluster 已按 topic fingerprint 查库复用并追加新边；检索侧已能在命中 edge 所属 cluster 时带出 `description_variants` 和 sibling edge nodes，但尚未实现相似 cluster 向量召回、LLM cluster merge、后台宏观整理和复杂冲突状态维护。
@@ -254,25 +244,25 @@ SearchResult 当前结构要点：
   当前方案：只用 normalized alias 和可选 `entity_type` 精确匹配。  
   原因：LLM 合并实体的误合并成本很高，尤其是不同样本、同名人物、宠物/项目重名场景。后续若引入 LLM，只能作为候选确认，不应直接覆盖 alias 精确匹配结果。
 
-- **事实 merge / update / contradiction**  
-  设计方向：通过 `fact_merge.md` 和 `contradiction_check.md` 判断 merge、update、keep separate、conflict。  
-  当前方案：同一 `subject_node_id + predicate` 下存在旧 fact 时调用 `contradiction_check.md`，由 LLM 判断是否冲突；不再使用硬编码多值谓词或规则兜底。
-  原因：谓词是否多值、object 是否兼容、时间有效期如何更新都是语义判断，硬编码会误退役 `loves/travels_to` 等事实。若没有可用维护 LLM，当前选择显式失败，避免静默写坏图结构。
+- **memory node merge / update / contradiction**
+  设计方向：旧 fact merge/conflict prompt 需要泛化为统一 MemoryNode 级维护。
+  当前方案：写入主路径只做确定性同 ID / entity alias 精确复用，不进行规则化事实 merge、冲突退役或 fallback 抽取。
+  原因：谓词是否多值、object 是否兼容、时间有效期如何更新都是语义判断，硬编码容易误退役事实。后续若接入维护 LLM，必须由明确候选召回触发，失败时显式失败。
 
-- **HyperEdge 复用与合并**  
-  设计方向：根据成员重叠、relation、roles、polarity、source/time 召回候选并判断复用、追加成员、新版本或新建。  
-  当前方案：基础边保守新建，只按确定性 fingerprint 去重；成员重叠不触发合并。  
-  原因：成员相近的边可能表达支持、修正或冲突关系，直接合并会污染语义。后续 edge merge 必须先完成冲突感知和角色兼容规则。
+- **HyperEdge 复用与合并**
+  设计方向：根据 description、members、source/time 和 optional inferred metadata 召回候选并判断复用、追加成员、新版本或新建。
+  当前方案：基础边保守新建，只按确定性 fingerprint 去重；成员重叠不触发合并。
+  原因：成员相近的边可能表达支持、修正或冲突关系，直接合并会污染语义。后续 edge merge 必须先完成冲突感知和 description-only edge 兼容判断。
 
 - **EdgeCluster 整理**  
   设计方向：相关 HyperEdge 进入同一 cluster，并支持后台 cluster merge。  
   当前方案：`BasicEdgeClusterBuilder` 先按 edge metadata 中的 topic hint 生成 `cluster_fingerprint`，查库复用已有 cluster；没有命中时才新建 cluster，后台整理仍只保留配置开关。
   原因：cluster 相似度阈值、冲突 cluster 的状态机、description variants 的压缩策略都还没有稳定标准。
 
-- **LocalNodeGraph 丰富度**  
-  设计方向：节点内部保存属性、角色、三元组、qualifiers 和局部状态。  
-  当前方案：从 assertions 和 event participants 构建基础 triple/roles；不要求 LLM 直接输出复杂 graph。  
-  原因：让 LLM 同时抽取 facts、attributes、triples 容易重复写入同一事实。当前以 assertions 为主输入，能保持信息来源单一。
+- **LocalNodeGraph 丰富度**
+  设计方向：节点内部保存三元组、qualifiers 和局部状态。
+  当前方案：只消费 `ExtractedNode.triples`，并规范化去重；不按 label 写死 entity/event/fact 的构图策略。
+  原因：所有 label 的 node 都应走同一构建路径，避免重新引入旧的分类型抽取主路径。
 
 - **标签专门策略**  
   设计方向：`state/task/instruction/tool` 可有各自的时间、索引、检索策略；`turn` 作为独立对话记录可有自己的时间和 turn_dialogue 索引策略。  
@@ -307,13 +297,10 @@ SearchResult 当前结构要点：
   当前 `BasicHyperEdgeBuilder` / `BasicEdgeClusterBuilder` 承担内置 M1 规则，`IngestionPipeline` 仍保留可注入的 `hyperedge_builder` / `edge_cluster_builder` 扩展点。这个形态比“只有 protocol 占位”更可运行，也比直接把规则写死在 assembler 更容易替换。
 
 - **维护 prompt 按候选触发，不做规则兜底**
-  原设计容易让后续实现把多个 maintenance prompt 串到每次写入中。当前只在出现同一 property key 的旧 fact 候选时触发 `contradiction_check`；没有候选时不调用。后续接入其他 prompt 时，也应有明确召回候选、触发条件、成本控制和失败处理，不应每次写入无条件多轮调用 LLM，也不应用脆弱规则代替语义判决。
+  原设计容易让后续实现把多个 maintenance prompt 串到每次写入中。当前主路径不调用旧 maintenance prompt；后续接入新 prompt 时，应有明确召回候选、触发条件、成本控制和失败处理，不应每次写入无条件多轮调用 LLM，也不应用脆弱规则代替语义判决。
 
-- **`assertions` 作为事实、property index 和基础 triple 的唯一主输入**  
-  这比让 LLM 同时输出 facts、attributes、triples 更稳定。后续即使扩展 extraction schema，也应避免同一事实在多个字段重复入库。
-
-- **保守冲突退役优先于物理覆盖**  
-  当前保留旧 fact，并用 `retired/superseded_by/invalidated_by/correction edge` 表达修正。这一点应保持，不应为了“更新事实”直接覆盖旧节点。
+- **`nodes` 作为长期记忆对象的唯一主输入**
+  当前不再接受 `entities/events/assertions/sources` 主抽取 shape，也不建立 fact property index。后续即使扩展 extraction schema，也应避免同一事实在多个字段重复入库。
 
 - **EdgeCluster 不是 HyperEdge merge 的前置条件**  
   当前实现允许先创建具体 HyperEdge，再用 cluster 轻量聚合。后续相似边召回、cluster merge 都应维持“不强制合并具体边”的原则。
@@ -333,6 +320,7 @@ SearchResult 当前结构要点：
 
 - 阶段 1 schema 重构：`MemoryExtraction` 可解析 `nodes/edge_summaries`；拒绝旧 `entities/events/assertions/sources`；拒绝 LLM 输出来源字段和 typed-edge 字段；`HyperEdge` schema 不再暴露 `polarity/roles`。
 - 阶段 2 抽取重构：`memory_extraction.md` 输出 shape 改为 `nodes/edge_summaries`；parser 不再做旧抽取 shape 映射；字段数组和对象 shape 类型错误会直接失败。
+- 阶段 3-4 写入重构：`NodeBuilder/LocalGraphBuilder/GraphAssembler` 消费同构节点和 edge summaries；新写入路径可构建 description-only HyperEdge 并通过 edge-centered retrieval 召回。
 - 默认配置和 split config 加载。
 - `.env` 模型变量解析。
 - embedding `batch_size` 配置和分批调用。

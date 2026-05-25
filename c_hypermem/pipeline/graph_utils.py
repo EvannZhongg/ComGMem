@@ -6,7 +6,6 @@ from c_hypermem.pipeline.context import AssemblyContext
 from c_hypermem.schema import (
     EdgeCluster,
     EdgeClusterMember,
-    FactPropertyIndexEntry,
     HyperEdge,
     LocalNodeGraph,
     MemoryNode,
@@ -29,21 +28,6 @@ def source_metadata(
     if extra:
         metadata.update(extra)
     return {key: value for key, value in metadata.items() if value not in (None, [], {})}
-
-
-def event_fallback_text(metadata: dict[str, Any]) -> str:
-    session_id = metadata.get("session_id") or metadata.get("conversation_id")
-    date = metadata.get("date") or metadata.get("timestamp")
-    parts = ["Interaction"]
-    if session_id:
-        parts.append(f"in {session_id}")
-    if date:
-        parts.append(f"on {date}")
-    return " ".join(parts)
-
-
-def property_key(subject_node_id: str, predicate: str) -> str:
-    return f"{subject_node_id}:{compact_key(predicate)}"
 
 
 def dedupe_labels(labels: list[str]) -> list[str]:
@@ -73,8 +57,6 @@ def merge_local_graph(existing: LocalNodeGraph, incoming: LocalNodeGraph) -> Loc
         if key not in triple_keys:
             existing.triples.append(triple)
             triple_keys.add(key)
-    existing.attributes = deep_merge_dict(existing.attributes, incoming.attributes)
-    existing.roles.update(incoming.roles)
     return existing
 
 
@@ -115,10 +97,6 @@ def dedupe_clusters(clusters: list[EdgeCluster]) -> list[EdgeCluster]:
 
 def dedupe_cluster_members(members: list[EdgeClusterMember]) -> list[EdgeClusterMember]:
     return list({(member.cluster_id, member.edge_id): member for member in members}.values())
-
-
-def dedupe_fact_properties(properties: list[FactPropertyIndexEntry]) -> list[FactPropertyIndexEntry]:
-    return list({(item.property_key, item.fact_node_id): item for item in properties}.values())
 
 
 def merge_node(existing: MemoryNode | None, incoming: MemoryNode, context: AssemblyContext) -> MemoryNode:

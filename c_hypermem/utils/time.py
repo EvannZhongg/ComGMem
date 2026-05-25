@@ -18,10 +18,10 @@ def make_time_bundle(
 ) -> TimeBundle:
     now = utc_now_iso()
     bundle = TimeBundle()
-    bundle.world.event_time = event_time
-    bundle.world.source_timestamp = source_timestamp
-    if valid_start:
-        bundle.world.valid_time = ValidTime(start=valid_start)
+    absolute_time = event_time or now
+    bundle.world.event_time = absolute_time
+    bundle.world.source_timestamp = source_timestamp or now
+    bundle.world.valid_time = ValidTime(start=valid_start or absolute_time)
     bundle.lifecycle.created_at = now
     bundle.lifecycle.inserted_at = now
     bundle.activation.created_turn = current_turn

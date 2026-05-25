@@ -67,7 +67,6 @@ class LocalGraphPolicyConfig(BaseModel):
     enabled: bool = True
     allow_triples: bool = True
     allow_attributes: bool = True
-    allow_roles: bool = True
 
 
 class IndexingPolicyConfig(BaseModel):
@@ -77,17 +76,12 @@ class IndexingPolicyConfig(BaseModel):
     time_index: bool = False
 
 
-class TimePolicyConfig(BaseModel):
-    prefer_world_time: bool = False
-
-
 class TurnConfig(BaseModel):
     enabled: bool = True
     description: str = (
         "Raw conversation turns or message spans that preserve source text, "
         "speaker role, order, and provenance for later evidence tracing."
     )
-    time: TimePolicyConfig = Field(default_factory=lambda: TimePolicyConfig(prefer_world_time=True))
     indexing: IndexingPolicyConfig = Field(
         default_factory=lambda: IndexingPolicyConfig(lexical=True, vector=True, time_index=True)
     )
@@ -97,10 +91,8 @@ class NodeLabelConfig(BaseModel):
     enabled: bool = True
     description: str = ""
     alias_resolution: bool = False
-    property_index: bool = False
     local_graph: LocalGraphPolicyConfig = Field(default_factory=LocalGraphPolicyConfig)
     indexing: IndexingPolicyConfig = Field(default_factory=IndexingPolicyConfig)
-    time: TimePolicyConfig = Field(default_factory=TimePolicyConfig)
 
 
 class NodeLabelsConfig(BaseModel):
@@ -120,7 +112,6 @@ class NodeLabelsConfig(BaseModel):
 
 class HyperEdgeResolutionConfig(BaseModel):
     use_member_overlap_as_recall_signal: bool = True
-    require_relation_role_polarity_compatibility_for_merge: bool = True
 
 
 class HyperEdgesConfig(BaseModel):
@@ -128,7 +119,6 @@ class HyperEdgesConfig(BaseModel):
     build_from_extraction: bool = True
     merge_policy: str = "conservative"
     member_policy_default: str = "appendable"
-    basic_edge_types: list[str] = Field(default_factory=lambda: ["evidence", "state", "correction"])
     resolution: HyperEdgeResolutionConfig = Field(default_factory=HyperEdgeResolutionConfig)
 
 

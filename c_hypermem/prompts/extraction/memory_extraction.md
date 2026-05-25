@@ -88,7 +88,6 @@ Return exactly one JSON object:
       "triples": [
         {"subject": "Alice", "predicate": "discussed", "object": "interview scheduling"}
       ],
-      "time": "2024-01-03",
       "edge_summary_refs": ["e1"]
     }
   ],
@@ -109,13 +108,12 @@ Return exactly one JSON object:
   array when a node has no useful local triples.
 - `nodes[].triples[].subject`, `predicate`, and `object`: concise readable
   strings. Do not output triple ids.
-- `nodes[].triples[].qualifiers`: optional local qualifiers for time, condition,
-  or scope when needed. Do not put source references here.
+- `nodes[].triples[].qualifiers`: optional local qualifiers for semantic
+  condition or scope when needed. Do not put source references or system
+  construction timestamps here.
 - `nodes[].edge_summary_refs`: refs of edge summaries that this node belongs to.
   Use an empty array only when the node is useful by itself and no edge summary
   naturally groups it with other extracted nodes.
-- `nodes[].time`: optional explicit real-world time from metadata or target
-  text. Omit or set null when no clear time exists.
 - `edge_summaries[].ref`: temporary reference local to this JSON object, such as
   `e1`.
 - `edge_summaries[].description`: one sentence describing why the referenced
@@ -136,6 +134,7 @@ Do not output these fields anywhere:
 - `relation`
 - `roles`
 - `polarity`
+- `nodes[].time`
 - `confidence`
 - `salience`
 - `weight`
@@ -152,8 +151,9 @@ Target.
 - **Description Only Edges:** Use `edge_summaries` only for natural-language
   grouping descriptions. Do not type edges, assign roles, or encode polarity.
 - **Contextual Completeness:** If a node relies on implicit context, such as
-  pronouns or relative time, resolve it to explicit referents and timestamps
-  where the target supports doing so.
+  pronouns or relative dates stated in the target, resolve it in the node text
+  or local triple qualifiers where the target supports doing so. Do not output a
+  node construction time; the system writes that later.
 - **No System Structure:** Do not output system identifiers, scores, weights, or
   outer graph structures.
 
