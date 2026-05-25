@@ -447,6 +447,52 @@ def test_extraction_prompt_injects_node_label_config():
     assert "extract memories only from Target" in prompt
 
 
+def test_fact_merge_prompt_uses_explicit_placeholders(tmp_path):
+    extractor = SequenceExtractor(
+        [
+            {
+                "entities": [{"name": "Alice"}],
+                "assertions": [{"subject": "Alice", "predicate": "loves", "object": "tea"}],
+            },
+            {
+                "entities": [{"name": "Alice"}],
+                "assertions": [{"subject": "Alice", "predicate": "loves", "object": "coffee"}],
+            },
+        ]
+    )
+    maintenance_llm = MaintenanceLLM(
+        [
+            {
+                "decision": "keep_separate",
+                "affected_existing_refs": [],
+                "merged_fact": None,
+                "rationale": "A person can love both tea and coffee.",
+            }
+        ]
+    )
+    memory = Memory.from_config(
+        {"storage": {"path": str(tmp_path / "memory.sqlite3")}},
+        extractor=extractor,
+        maintenance_llm=maintenance_llm,
+    )
+    namespace = "fact_merge_prompt_ns"
+    memory.reset(namespace)
+
+    memory.add_memory("Alice loves tea.", namespace=namespace)
+    memory.add_memory("Alice loves coffee.", namespace=namespace)
+    prompt = maintenance_llm.prompts[0]
+    memory.close()
+
+    assert "{{NEW_FACT}}" not in prompt
+    assert "{{NEW_FACT_SOURCE}}" not in prompt
+    assert "{{EXISTING_FACTS}}" not in prompt
+    assert "{{STRICT_JSON_SHAPE}}" not in prompt
+    assert "New fact:" in prompt
+    assert "Alice loves coffee" in prompt
+    assert "existing:0" in prompt
+    assert "Alice loves tea" in prompt
+
+
 def test_add_memory_passes_recent_context_and_target_to_extractor(tmp_path):
     extractor = RecordingWindowExtractor()
     memory = Memory.from_config(
@@ -597,6 +643,12 @@ def test_conflicting_fact_retires_old_fact_and_adds_correction_edge(tmp_path):
         maintenance_llm=MaintenanceLLM(
             [
                 {
+                    "decision": "needs_contradiction_check",
+                    "affected_existing_refs": ["existing:0"],
+                    "merged_fact": None,
+                    "rationale": "The pet species may be mutually exclusive.",
+                },
+                {
                     "conflict_state": "contradiction",
                     "affected_existing_refs": ["existing:0"],
                     "recommended_old_status": "retired",
@@ -619,6 +671,8 @@ def test_conflicting_fact_retires_old_fact_and_adds_correction_edge(tmp_path):
     retired = [node for node in nodes if node.status == "retired"]
     assert retired
     assert retired[0].attributes["object"] == "dog"
+    assert retired[0].local_graph.triples[0].status == "retired"
+    assert retired[0].local_graph.triples[0].invalidated_by
     assert any(edge.edge_type == "correction" for edge in edges)
     assert stats["fact_properties"] == 2
 
@@ -645,6 +699,12 @@ def test_retired_fact_local_graph_vector_is_removed_from_vector_store(tmp_path):
         extractor=extractor,
         maintenance_llm=MaintenanceLLM(
             [
+                {
+                    "decision": "needs_contradiction_check",
+                    "affected_existing_refs": ["existing:0"],
+                    "merged_fact": None,
+                    "rationale": "The pet species may be mutually exclusive.",
+                },
                 {
                     "conflict_state": "contradiction",
                     "affected_existing_refs": ["existing:0"],
@@ -691,10 +751,9 @@ def test_edge_cluster_builder_reuses_existing_property_cluster(tmp_path):
         maintenance_llm=MaintenanceLLM(
             [
                 {
-                    "conflict_state": "compatible",
+                    "decision": "keep_separate",
                     "affected_existing_refs": [],
-                    "recommended_old_status": "active",
-                    "valid_time_update": {},
+                    "merged_fact": None,
                     "rationale": "A person can love both tea and coffee.",
                 }
             ]
@@ -738,10 +797,9 @@ def test_reused_edge_cluster_appends_description_variants(tmp_path):
         maintenance_llm=MaintenanceLLM(
             [
                 {
-                    "conflict_state": "compatible",
+                    "decision": "keep_separate",
                     "affected_existing_refs": [],
-                    "recommended_old_status": "active",
-                    "valid_time_update": {},
+                    "merged_fact": None,
                     "rationale": "A person can love both tea and coffee.",
                 }
             ]
@@ -768,6 +826,56 @@ def test_reused_edge_cluster_appends_description_variants(tmp_path):
     ]
     assert "Alice loves tea" in indexed_variant_texts
     assert "Alice loves coffee" in indexed_variant_texts
+
+
+def test_keep_separate_indexes_new_fact_vectors(tmp_path):
+    embedding_client = RecordingEmbeddingClient()
+    vector_store = RecordingVectorStore()
+    extractor = SequenceExtractor(
+        [
+            {
+                "entities": [{"name": "Alice"}],
+                "assertions": [{"subject": "Alice", "predicate": "loves", "object": "tea"}],
+            },
+            {
+                "entities": [{"name": "Alice"}],
+                "assertions": [{"subject": "Alice", "predicate": "loves", "object": "coffee"}],
+            },
+        ]
+    )
+    memory = Memory.from_config(
+        {"storage": {"path": str(tmp_path / "memory.sqlite3")}},
+        extractor=extractor,
+        maintenance_llm=MaintenanceLLM(
+            [
+                {
+                    "decision": "keep_separate",
+                    "affected_existing_refs": [],
+                    "merged_fact": None,
+                    "rationale": "A person can love both tea and coffee.",
+                }
+            ]
+        ),
+        embedding_client=embedding_client,
+        vector_store=vector_store,
+    )
+    namespace = "keep_separate_vector_ns"
+    memory.reset(namespace)
+
+    memory.add_memory("Alice loves tea.", namespace=namespace)
+    memory.add_memory("Alice loves coffee.", namespace=namespace)
+    fact_nodes = [node for node in memory.store.list_nodes(namespace) if "fact" in node.node_labels]
+    coffee_fact = next(node for node in fact_nodes if "coffee" in node.content)
+    memory.close()
+
+    assert len(fact_nodes) == 2
+    indexed_by_type = {
+        record.payload["item_type"]
+        for record in vector_store.records
+        if record.payload.get("node_id") == coffee_fact.node_id
+    }
+    assert {"node_content", "node_summary", "node_local_graph"} <= indexed_by_type
+    assert any("Alice loves coffee" in record.text for record in vector_store.records)
 
 
 def test_retriever_uses_sqlite_fts_recall(tmp_path):
@@ -854,10 +962,9 @@ def test_graph_ripple_carries_edge_cluster_description_variants(tmp_path):
         maintenance_llm=MaintenanceLLM(
             [
                 {
-                    "conflict_state": "compatible",
+                    "decision": "keep_separate",
                     "affected_existing_refs": [],
-                    "recommended_old_status": "active",
-                    "valid_time_update": {},
+                    "merged_fact": None,
                     "rationale": "A person can love both tea and coffee.",
                 }
             ]
@@ -982,17 +1089,15 @@ def test_graph_maintenance_uses_llm_for_contradiction_decisions(tmp_path):
     maintenance_llm = MaintenanceLLM(
         [
             {
-                "conflict_state": "compatible",
+                "decision": "keep_separate",
                 "affected_existing_refs": [],
-                "recommended_old_status": "active",
-                "valid_time_update": {},
+                "merged_fact": None,
                 "rationale": "A person can love both tea and coffee.",
             },
             {
-                "conflict_state": "compatible",
+                "decision": "keep_separate",
                 "affected_existing_refs": [],
-                "recommended_old_status": "active",
-                "valid_time_update": {},
+                "merged_fact": None,
                 "rationale": "A person can travel to multiple places.",
             },
         ]
@@ -1016,6 +1121,98 @@ def test_graph_maintenance_uses_llm_for_contradiction_decisions(tmp_path):
     assert not [node for node in nodes if node.status == "retired"]
     assert any("loves coffee" in node.content for node in nodes)
     assert any("travels_to Berlin" in node.content for node in nodes)
+
+
+def test_fact_merge_reuses_existing_fact_without_creating_duplicate(tmp_path):
+    extractor = SequenceExtractor(
+        [
+            {
+                "entities": [{"name": "Alice"}],
+                "assertions": [{"subject": "Alice", "predicate": "prefers", "object": "morning interviews"}],
+            },
+            {
+                "entities": [{"name": "Alice"}],
+                "assertions": [{"subject": "Alice", "predicate": "prefers", "object": "morning interviews"}],
+            },
+        ]
+    )
+    memory = Memory.from_config(
+        {"storage": {"path": str(tmp_path / "memory.sqlite3")}},
+        extractor=extractor,
+        maintenance_llm=MaintenanceLLM(
+            [
+                {
+                    "decision": "merge",
+                    "affected_existing_refs": ["existing:0"],
+                    "merged_fact": None,
+                    "rationale": "Both statements express the same preference.",
+                }
+            ]
+        ),
+    )
+    namespace = "fact_merge_ns"
+    memory.reset(namespace)
+
+    memory.add_memory("Alice prefers morning interviews.", namespace=namespace)
+    memory.add_memory("Alice likes morning interviews.", namespace=namespace)
+    fact_nodes = [node for node in memory.store.list_nodes(namespace) if "fact" in node.node_labels]
+    fact_properties = memory.store.find_fact_properties(namespace, fact_nodes[0].attributes["subject_node_id"] + ":prefers")
+    memory.close()
+
+    assert len(fact_nodes) == 1
+    assert fact_nodes[0].time.activation.updated_turn == 1
+    assert len(fact_properties) == 1
+
+
+def test_fact_update_reindexes_existing_fact_node(tmp_path):
+    embedding_client = RecordingEmbeddingClient()
+    vector_store = RecordingVectorStore()
+    extractor = SequenceExtractor(
+        [
+            {
+                "entities": [{"name": "Alice"}],
+                "assertions": [{"subject": "Alice", "predicate": "lives_in", "object": "California"}],
+            },
+            {
+                "entities": [{"name": "Alice"}],
+                "assertions": [{"subject": "Alice", "predicate": "lives_in", "object": "San Francisco, California"}],
+            },
+        ]
+    )
+    memory = Memory.from_config(
+        {"storage": {"path": str(tmp_path / "memory.sqlite3")}},
+        extractor=extractor,
+        maintenance_llm=MaintenanceLLM(
+            [
+                {
+                    "decision": "update",
+                    "affected_existing_refs": ["existing:0"],
+                    "merged_fact": "Alice lives_in San Francisco, California",
+                    "rationale": "The new location is a more specific version.",
+                }
+            ]
+        ),
+        embedding_client=embedding_client,
+        vector_store=vector_store,
+    )
+    namespace = "fact_update_ns"
+    memory.reset(namespace)
+
+    memory.add_memory("Alice lives in California.", namespace=namespace)
+    memory.add_memory("Alice lives in San Francisco, California.", namespace=namespace)
+    fact_nodes = [node for node in memory.store.list_nodes(namespace) if "fact" in node.node_labels]
+    memory.close()
+
+    assert len(fact_nodes) == 1
+    assert fact_nodes[0].content == "Alice lives_in San Francisco, California"
+    assert fact_nodes[0].attributes["object"] == "San Francisco, California"
+    assert fact_nodes[0].local_graph.triples[0].object == "San Francisco, California"
+    assert any(
+        record.payload["item_type"] == "node_local_graph"
+        and record.payload["node_id"] == fact_nodes[0].node_id
+        and "San Francisco" in record.text
+        for record in vector_store.records
+    )
 
 
 def test_graph_maintenance_requires_llm_for_overlapping_fact_checks(tmp_path):

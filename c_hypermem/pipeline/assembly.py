@@ -87,18 +87,54 @@ class GraphAssembler:
                     entity_map[normalize_text(alias)] = subject_node
 
             fact_node = self.node_builder.build_fact_node(assertion, subject_node, context)
-            nodes_by_id[fact_node.node_id] = self._merge_node(nodes_by_id.get(fact_node.node_id), fact_node, context)
-            fact_node = nodes_by_id[fact_node.node_id]
-            assertion_links.append((fact_node, subject_node, assertion))
-
+            fact_property_key = property_key(subject_node.node_id, assertion.predicate)
             fact_property = FactPropertyIndexEntry(
                 namespace=context.namespace,
-                property_key=property_key(subject_node.node_id, assertion.predicate),
+                property_key=fact_property_key,
                 subject_node_id=subject_node.node_id,
                 predicate=assertion.predicate,
                 fact_node_id=fact_node.node_id,
                 updated_at=utc_now_iso(),
             )
+            old_properties = self.store.find_fact_properties(context.namespace, fact_property_key, status="active")
+            old_fact_ids = [item.fact_node_id for item in old_properties if item.fact_node_id != fact_node.node_id]
+            old_facts = self.store.get_nodes(context.namespace, old_fact_ids)
+            if old_facts:
+                overlap_decision = self.maintenance.resolve_fact_overlap(
+                    new_fact=fact_node,
+                    assertion=assertion,
+                    old_facts=old_facts,
+                    context=context,
+                )
+                if overlap_decision.should_merge_or_update:
+                    for old_fact in _affected_facts(old_facts, overlap_decision.affected_refs):
+                        updated_fact = self.maintenance.apply_fact_overlap_update(
+                            old_fact=old_fact,
+                            new_fact=fact_node,
+                            assertion=assertion,
+                            decision=overlap_decision,
+                            context=context,
+                        )
+                        nodes_by_id[updated_fact.node_id] = updated_fact
+                        fact_properties.append(
+                            FactPropertyIndexEntry(
+                                namespace=context.namespace,
+                                property_key=fact_property_key,
+                                subject_node_id=subject_node.node_id,
+                                predicate=assertion.predicate,
+                                fact_node_id=updated_fact.node_id,
+                                updated_at=utc_now_iso(),
+                            )
+                        )
+                    continue
+                if overlap_decision.needs_contradiction_check:
+                    old_facts = _affected_facts(old_facts, overlap_decision.affected_refs)
+                else:
+                    old_facts = []
+
+            nodes_by_id[fact_node.node_id] = self._merge_node(nodes_by_id.get(fact_node.node_id), fact_node, context)
+            fact_node = nodes_by_id[fact_node.node_id]
+            assertion_links.append((fact_node, subject_node, assertion))
             fact_properties.append(fact_property)
             newly_retired_nodes, correction_edges, retired_properties = self.maintenance.retire_conflicting_facts(
                 property_key=fact_property.property_key,
@@ -106,6 +142,7 @@ class GraphAssembler:
                 assertion=assertion,
                 context=context,
                 correction_edge_builder=self.hyperedge_builder.build_correction_edge,
+                old_facts=old_facts,
             )
             retired_nodes.extend(newly_retired_nodes)
             for retired_node in newly_retired_nodes:
@@ -232,3 +269,8 @@ class GraphAssembler:
                     )
                 )
         return entries
+
+
+def _affected_facts(old_facts: list[MemoryNode], refs: list[str]) -> list[MemoryNode]:
+    by_ref = {f"existing:{index}": fact for index, fact in enumerate(old_facts)}
+    return [by_ref[ref] for ref in refs if ref in by_ref]

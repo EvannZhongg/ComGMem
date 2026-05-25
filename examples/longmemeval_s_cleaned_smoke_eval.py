@@ -201,12 +201,20 @@ def _run_sample(
                     },
                 )
                 ingested_pairs += 1
-                if ingested_pairs % log_every == 0 or ingested_pairs == total_pairs:
+                completed_total = skipped_pairs + ingested_pairs
+                remaining_pairs = max(0, total_pairs - completed_total)
+                if ingested_pairs % log_every == 0 or completed_total == total_pairs:
                     logger.info(
-                        "[%s] pair %s/%s done session=%s pair=%s/%s elapsed=%.1fs",
+                        (
+                            "[%s] pair done total_progress=%s/%s "
+                            "new_this_run=%s skipped=%s remaining=%s session=%s pair=%s/%s elapsed=%.1fs"
+                        ),
                         question_id,
-                        ingested_pairs,
+                        completed_total,
                         total_pairs,
+                        ingested_pairs,
+                        skipped_pairs,
+                        remaining_pairs,
                         session_index,
                         pair_index,
                         len(pairs),

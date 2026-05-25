@@ -369,6 +369,22 @@ class SQLiteStore:
         ).fetchall()
         return [_message_from_turn_row(row) for row in rows]
 
+    def list_turn_messages(self, namespace: str, turn_ids: list[str]) -> list[Message]:
+        if not turn_ids:
+            return []
+        unique_turn_ids = list(dict.fromkeys(turn_ids))
+        placeholders = ",".join("?" for _ in unique_turn_ids)
+        rows = self.conn.execute(
+            f"""
+            SELECT *
+            FROM turns
+            WHERE namespace = ? AND turn_id IN ({placeholders})
+            ORDER BY turn_index ASC, message_index ASC
+            """,
+            [namespace, *unique_turn_ids],
+        ).fetchall()
+        return [_message_from_turn_row(row) for row in rows]
+
     def next_turn_index(self, namespace: str) -> int:
         row = self.conn.execute(
             "SELECT COALESCE(MAX(turn_index) + 1, 0) AS next_turn_index FROM turns WHERE namespace = ?",
