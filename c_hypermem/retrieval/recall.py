@@ -132,7 +132,7 @@ class Retriever:
         return reciprocal_rank_fusion_channels(
             ranked_lists=ranked_lists,
             vector_hit_payloads=vector_hits_by_node,
-            k=max(1, self.config.rrf_k),
+            k=max(1, self.config.node_rrf_k),
         )
 
     def _rank_track2_edges(self, *, namespace: str, edge_hits: list[VectorEdgeHit]) -> list[Track2RankedEdge]:
@@ -211,12 +211,10 @@ class Retriever:
         return ranked
 
     def _edge_rrf_k(self) -> int:
-        configured = self.config.edge_rrf_k
-        return max(1, configured if configured is not None else self.config.rrf_k)
+        return max(1, self.config.edge_rrf_k)
 
     def _edge_core_limit(self) -> int:
-        configured = self.config.edge_core_top_k
-        return max(0, configured if configured is not None else self.config.final_top_k)
+        return max(0, self.config.edge_core_top_k)
 
     def _to_result(self, ranked_edge: RankedEdge, *, analysis_metadata: dict) -> SearchResult:
         edge = ranked_edge.edge

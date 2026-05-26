@@ -1579,11 +1579,16 @@ index:
 
 retrieval:
   query_analysis: false
+  node_rrf_k: 60
+  edge_rrf_k: 60
   lexical_top_k: 30
   node_content_vector_top_k: 20
   node_local_graph_vector_top_k: 20
-  node_summary_vector_top_k: 10
-  graph_seed_top_k: 80
+  hyper_edge_description_vector_top_k: 10
+  graph_seed_top_k: 70
+  edge_core_top_k: 10
+  cluster_periphery_edge_limit: 20
+  cluster_periphery_node_limit: 50
   edge_coherence_alpha: 0.5
   edge_coherence_beta: 2.0
   final_top_k: 10

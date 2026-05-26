@@ -20,10 +20,10 @@
 - lexical recall 候选数。
 - node content / node local graph 向量召回候选数。`node_content` 向量文本由 `MemoryNode.content` 与 `MemoryNode.summary` 拼接生成，不再拆分独立 `node_summary` 向量通道。
 - HyperEdge description 向量召回候选数。
-- node-level RRF 常数 `rrf_k`，用于 Track 1 的 FTS / node_content / node_local_graph 融合。
-- node RRF 后进入 Track 1 图谱种子阶段的 seed 数，记为 `K1`，当前可对应 `graph_seed_top_k`。
-- edge-level RRF 常数 `edge_rrf_k`；当该配置为空时复用 `rrf_k`。
-- edge-level RRF 后保留的核心 HyperEdge 数，记为 `K2`，当前配置为 `edge_core_top_k`；当该配置为空时复用 `final_top_k`。
+- node-level RRF 常数 `node_rrf_k`，用于 Track 1 的 FTS / node_content / node_local_graph 融合。
+- node RRF 后进入 Track 1 图谱种子阶段的 seed 数，记为 `K1`，当前可对应 `graph_seed_top_k`；该值不应超过 lexical / node_content / node_local_graph 三路召回候选数之和。
+- edge-level RRF 常数 `edge_rrf_k`。
+- edge-level RRF 后保留的核心 HyperEdge 数，记为 `K2`，当前配置为 `edge_core_top_k`。
 - controlled cluster ripple 每条 core edge 可附加的 sibling edge 数量上限，当前配置为 `cluster_periphery_edge_limit`。
 - controlled cluster ripple 每条 core edge 可附加的 periphery node 数量上限，当前配置为 `cluster_periphery_node_limit`。
 - HyperEdge coherence 的 `alpha` / `beta` 权重。
@@ -88,9 +88,9 @@ Track 1 只消费三路 node 召回：
 
 ```text
 S_node(n) =
-  1 / (rrf_k + rank_lexical)
-  + 1 / (rrf_k + rank_node_content_vector)
-  + 1 / (rrf_k + rank_node_local_graph_vector)
+  1 / (node_rrf_k + rank_lexical)
+  + 1 / (node_rrf_k + rank_node_content_vector)
+  + 1 / (node_rrf_k + rank_node_local_graph_vector)
 ```
 
 其中：
@@ -144,9 +144,9 @@ S_final_edge(E) =
   + 1 / (edge_rrf_k + rank_track2(E))
 ```
 
-如果某条边只出现在一个 Track 中，另一个 Track 的贡献为 `0`。`edge_rrf_k` 为空时复用 `retrieval.rrf_k`。
+如果某条边只出现在一个 Track 中，另一个 Track 的贡献为 `0`。
 
-融合后按 `S_final_edge(E)` 降序排序，并严格截断为 Top `K2` 核心 HyperEdges。`K2` 是控制图谱扩散规模的关键参数；`edge_core_top_k` 为空时复用 `final_top_k`。
+融合后按 `S_final_edge(E)` 降序排序，并严格截断为 Top `K2` 核心 HyperEdges。`K2` 是控制图谱扩散规模的关键参数，由 `edge_core_top_k` 显式配置。
 
 如果某条边缺失某个 Track 命中，该 Track 的 RRF 贡献显式为 `0`，等价于该 Track rank 为正无穷。若一条边同时出现在 Track 1 和 Track 2，则两路 RRF 贡献相加。
 

@@ -170,7 +170,7 @@ def test_default_config_includes_split_config_files():
     assert config.retrieval.lexical_top_k == 30
     assert config.retrieval.node_content_vector_top_k == 20
     assert config.retrieval.node_local_graph_vector_top_k == 20
-    assert config.retrieval.graph_seed_top_k == 80
+    assert config.retrieval.graph_seed_top_k == 70
     assert config.retrieval.cluster_periphery_edge_limit == 20
     assert config.retrieval.cluster_periphery_node_limit == 50
     assert config.retrieval.edge_coherence_alpha == 0.5

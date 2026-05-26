@@ -49,7 +49,7 @@ def test_default_config_uses_global_token_counting_config():
     assert models_raw["token_counting"]["tokenizer_encoding"] == "cl100k_base"
     assert config.nlp.model_path == "models/en_core_web_sm"
     assert models_raw["nlp"]["model_path"] == "models/en_core_web_sm"
-    assert config.retrieval.rrf_k == 60
+    assert config.retrieval.node_rrf_k == 60
     assert config.retrieval.hyper_edge_description_vector_top_k == 10
     assert config.retrieval.cluster_periphery_edge_limit == 20
     assert config.retrieval.cluster_periphery_node_limit == 50
@@ -1338,7 +1338,7 @@ def test_vector_retrieval_uses_separate_node_rrf_channels(tmp_path):
     memory = Memory.from_config(
         {
             "storage": {"path": str(tmp_path / "memory.sqlite3")},
-            "retrieval": {"rrf_k": 10},
+            "retrieval": {"node_rrf_k": 10},
         },
         extractor=StaticHomogeneousExtractor(),
         embedding_client=embedding_client,
@@ -1375,7 +1375,11 @@ def test_hyper_edge_description_vector_recall_returns_edge_candidate(tmp_path):
     memory = Memory.from_config(
         {
             "storage": {"path": str(tmp_path / "memory.sqlite3")},
-            "retrieval": {"rrf_k": 10, "hyper_edge_description_vector_top_k": 3},
+            "retrieval": {
+                "node_rrf_k": 10,
+                "edge_rrf_k": 10,
+                "hyper_edge_description_vector_top_k": 3,
+            },
         },
         extractor=StaticHomogeneousExtractor(),
         embedding_client=embedding_client,
@@ -1421,7 +1425,11 @@ def test_hyper_edge_description_track_stays_edge_level_without_node_projection(t
     memory = Memory.from_config(
         {
             "storage": {"path": str(tmp_path / "memory.sqlite3")},
-            "retrieval": {"rrf_k": 10, "hyper_edge_description_vector_top_k": 2},
+            "retrieval": {
+                "node_rrf_k": 10,
+                "edge_rrf_k": 10,
+                "hyper_edge_description_vector_top_k": 2,
+            },
         },
         extractor=StaticHomogeneousExtractor(),
         embedding_client=embedding_client,

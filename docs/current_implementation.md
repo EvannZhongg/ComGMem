@@ -207,14 +207,14 @@ Memory.search(query, namespace)
 ```yaml
 retrieval:
   query_analysis: false
-  rrf_k: 60
-  edge_rrf_k:
+  node_rrf_k: 60
+  edge_rrf_k: 60
   lexical_top_k: 30
   node_content_vector_top_k: 20
   node_local_graph_vector_top_k: 20
   hyper_edge_description_vector_top_k: 10
-  graph_seed_top_k: 80
-  edge_core_top_k:
+  graph_seed_top_k: 70
+  edge_core_top_k: 10
   cluster_periphery_edge_limit: 20
   cluster_periphery_node_limit: 50
   edge_coherence_alpha: 0.5
@@ -222,7 +222,7 @@ retrieval:
   final_top_k: 10
 ```
 
-`edge_rrf_k: null` 表示复用 `rrf_k`；`edge_core_top_k: null` 表示复用 `final_top_k` 作为 K2。`cluster_periphery_edge_limit` 和 `cluster_periphery_node_limit` 控制每条 core edge 能带出的外围 sibling edges 与 periphery nodes；设为 `null` 表示不限制，设为 `0` 表示不附加。`final_top_k` 控制最终返回的核心 HyperEdge 数量，不是 MemoryNode 数量。
+`node_rrf_k` 控制 Track 1 内部 node-level RRF；`graph_seed_top_k` 控制 node RRF 后进入图扩散的 seed nodes 数量，默认不超过 `lexical_top_k + node_content_vector_top_k + node_local_graph_vector_top_k`；`edge_rrf_k` 控制 Track 1 / Track 2 汇合时的 edge-level RRF；`edge_core_top_k` 显式控制 K2 core edge 剪枝规模。`cluster_periphery_edge_limit` 和 `cluster_periphery_node_limit` 控制每条 core edge 能带出的外围 sibling edges 与 periphery nodes；设为 `null` 表示不限制，设为 `0` 表示不附加。`final_top_k` 控制最终返回的核心 HyperEdge 数量，不是 MemoryNode 数量。
 
 Track 1 的 edge coherence 使用乘法器：
 
