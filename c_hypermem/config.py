@@ -128,11 +128,13 @@ class IndexConfig(BaseModel):
 class RetrievalConfig(BaseModel):
     query_analysis: Literal[False, "llm", "nlp"] = False
     rrf_k: int = 60
+    edge_rrf_k: int | None = None
     lexical_top_k: int = 30
     node_content_vector_top_k: int = 20
     node_local_graph_vector_top_k: int = 20
     hyper_edge_description_vector_top_k: int = 10
     graph_seed_top_k: int = 80
+    edge_core_top_k: int | None = None
     edge_coherence_alpha: float = 0.5
     edge_coherence_beta: float = 2.0
     final_top_k: int = 10

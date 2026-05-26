@@ -166,44 +166,41 @@ maintenance:
 
 ## 7. 检索现状
 
-当前检索链路已重构为 edge-centered retrieval。入口仍是 `Memory.search(query, namespace, top_k)`，但返回的每条 `SearchResult` 代表一个最终 HyperEdge，而不是单个 MemoryNode。
+当前检索链路已落地为 `docs/retrieval_design.md` 描述的 Dual-Track Edge-Level RRF。入口仍是 `Memory.search(query, namespace, top_k)`，返回的每条 `SearchResult` 代表一条最终 HyperEdge，而不是单个 MemoryNode。
 
 当前流程：
 
 ```text
 Memory.search(query, namespace)
-  -> Retriever.search(...)
-     -> QueryAnalyzer.analyze(query)
-        - 当前默认 retrieval.query_analysis=false，只保留原始 query metadata
-     -> DenseVectorRecall.embed_query(query)
-     -> DenseVectorRecall.recall(...)
-        - node_content top 20
-        - node_local_graph top 20
-     -> DenseVectorRecall.recall_hyper_edges(...)
-        - hyper_edge_description top 10
-        - 每条命中 edge 的排名投影到其全部 active member nodes
-     -> SQLiteFTSRecall.recall(...)
-        - SQLite FTS top 30
-     -> reciprocal_rank_fusion_channels(...)
-        - lexical / node_content / node_local_graph / hyper_edge_description 四通道统一 RRF
-        - 同一 node 位于多条命中 edge 时，只取最佳 description rank 贡献，保留全部命中 payload
-     -> GraphRippleExpansion.expand(...)
-        - RRF top 80 作为图谱种子
-        - seed node -> incident HyperEdge -> edge 内 active nodes
-        - incident HyperEdge -> EdgeCluster -> sibling edge descriptions 和 sibling edge nodes
-        - 同一 HyperEdge 内 2+ seed hits 时计算 edge_coherence
-     -> final top 10 HyperEdge
-     -> SearchResult(edge, edge_nodes)
+  -> Track 1: Node-Centric Edge Ranking
+     -> FTS / node_content / node_local_graph 三路召回
+     -> node-level RRF
+     -> Top K1 seed MemoryNodes
+     -> incident HyperEdges
+     -> Score_track1(E) = max(S_node(v), v in E ∩ S)
+                          * (1 + alpha * max(0, N_hit - 1) ^ beta)
+  -> Track 2: Edge-Centric Direct Ranking
+     -> hyper_edge_description vector recall
+     -> active HyperEdge ranking
+  -> Edge-Level RRF
+     -> S_final_edge(E) = 1 / (edge_rrf_k + rank_track1(E))
+                        + 1 / (edge_rrf_k + rank_track2(E))
+     -> Top K2 core HyperEdges
+  -> Controlled Cluster Ripple
+     -> only clusters attached to Top K2 core edges may expand
+  -> SearchResult(core edge + member nodes + periphery context)
 ```
 
 已实现模块：
 
-- `retrieval/lexical_recall.py`：封装 SQLite FTS 词法召回。当前 FTS 表为 `nodes_fts`，索引 `content/summary/local_graph`，namespace 和 node_id 作为非全文索引字段保存。
-- `retrieval/vector_recall.py`：封装 node_content、node_local_graph 和 hyper_edge_description 向量召回。node 向量命中必须通过 payload 的 `node_id` 回 SQLite canonical store 读取 active `MemoryNode`；HyperEdge description 向量命中必须通过 payload 的 `edge_id` 回 SQLite canonical store 读取 active `HyperEdge`。
-- `retrieval/fusion.py`：封装 Reciprocal Rank Fusion。RRF 常数由 `retrieval.rrf_k` 配置，默认 `60`；对 HyperEdge description 排名向成员节点的投影按 node 取最佳 edge rank，使该通道对单节点最多贡献一次 RRF 分数。
-- `retrieval/graph_ripple.py`：封装图谱层涟漪扩散和 edge-centered ranking。
-- `stores/vector_store.py`：`VectorStore` 已增加 `search(...)` 协议，`QdrantVectorStore.search(...)` 使用 `query_points`。
-- `stores/sqlite_store.py`：新增 `nodes_fts` 和 `search_nodes_fts(...)`；新增 `get_edges(...)` 以支持 EdgeCluster sibling edges 回表。
+- `retrieval/lexical_recall.py`：封装 SQLite FTS 词法召回。当前 FTS 表为 `nodes_fts`，索引 `content/summary/local_graph`。
+- `retrieval/vector_recall.py`：封装 node_content、node_local_graph 和 hyper_edge_description 向量召回。node 向量命中通过 payload 的 `node_id` 回 SQLite 读取 active `MemoryNode`；HyperEdge description 命中通过 payload 的 `edge_id` 回 SQLite 读取 active `HyperEdge`。
+- `retrieval/fusion.py`：封装 node-level RRF，只融合 lexical / node_content / node_local_graph 三个 node 通道。
+- `retrieval/ranking.py`：封装 edge-level RRF，只消费 Track 1 / Track 2 的 HyperEdge rank。
+- `retrieval/graph_ripple.py`：负责 Track 1 的 node-derived edge ranking，以及 Top K2 core edges 的 controlled cluster periphery 附加。
+- `retrieval/recall.py`：负责编排 Track 1、Track 2、edge-level RRF、Top K2 剪枝和 `SearchResult` 输出。
+- `stores/vector_store.py`：`VectorStore` 已支持 `search(...)`，`QdrantVectorStore.search(...)` 使用 `query_points`。
+- `stores/sqlite_store.py`：提供 `search_nodes_fts(...)`、`get_incident_edges(...)`、`get_edges(...)` 和 EdgeCluster 回表接口。
 
 当前检索配置：
 
@@ -211,35 +208,49 @@ Memory.search(query, namespace)
 retrieval:
   query_analysis: false
   rrf_k: 60
+  edge_rrf_k:
   lexical_top_k: 30
   node_content_vector_top_k: 20
   node_local_graph_vector_top_k: 20
   hyper_edge_description_vector_top_k: 10
   graph_seed_top_k: 80
+  edge_core_top_k:
   edge_coherence_alpha: 0.5
   edge_coherence_beta: 2.0
   final_top_k: 10
 ```
 
-`final_top_k` 表示最终返回的 HyperEdge 数量，不是 MemoryNode 数量。每条 edge 结果在 `metadata.edge_nodes` 中携带该 edge 内包含的 node；每个 node 都稳定包含 `triples` 字段，哪怕为空列表。
+`edge_rrf_k: null` 表示复用 `rrf_k`；`edge_core_top_k: null` 表示复用 `final_top_k` 作为 K2。`final_top_k` 控制最终返回的核心 HyperEdge 数量，不是 MemoryNode 数量。
 
-相干性加分公式：
+Track 1 的 edge coherence 使用乘法器：
 
 ```text
-S_coherence(E) =
-  alpha * max(0, N_hit - 1) ** beta * S_base_avg
+Score_track1(E) =
+  max(S_node(v) for v in E ∩ S)
+  * (1 + alpha * max(0, N_hit(E) - 1) ^ beta)
 ```
 
-其中 `N_hit` 是 RRF 初始候选池中属于同一 HyperEdge、且由 lexical / node_content / node_local_graph 独立召回命中的 seed node 数量。HyperEdge description 命中投影出的成员节点获得基础 RRF 分，但投影本身不计为多个独立 coherence hit，避免一次 edge 命中随成员数额外放大。`N_hit <= 1` 时不加分；`N_hit >= 2` 时把分数写入 edge-level `score_parts.edge_coherence`，同时 edge 内成员 node 的 `score_parts.edge_coherence` 也会记录该结构化加分。
+其中 `N_hit(E)` 只统计 Top K1 seed nodes 中属于该边的节点数。HyperEdge description 向量命中不参与 coherence，也不会投影为成员 node 的 RRF 分数。coherence 只写入 edge-level `score_parts`，例如 `edge_coherence_multiplier` 和 `edge_coherence_bonus`。
+
+edge-level RRF 使用 Track 1 和 Track 2 的 edge rank：
+
+```text
+S_final_edge(E) =
+  1 / (edge_rrf_k + rank_track1(E))
+  + 1 / (edge_rrf_k + rank_track2(E))
+```
 
 SearchResult 当前结构要点：
 
 - `id`：`edge_id`。
-- `content`：edge description 加 edge 内 node 内容。
-- `score`：edge-level score，当前取 edge 内成员 node 的最高分。
+- `content`：core edge description 加 core edge 内 node 内容。
+- `score`：edge-level RRF 后的最终 edge score。
 - `metadata.edge_metadata`：系统写入的 edge metadata，例如 `source_turn_ids`。
-- `metadata.edge_nodes`：该 edge 内的 nodes，每个 node 带 `node_id/content/summary/score/channels/score_parts/matched_vector_items/source_turn_ids/triples/time/node_metadata`；不再暴露旧 `source_session_id/source_event_id`。
-- `metadata.cluster_edge_descriptions`：如果 edge 属于 EdgeCluster，会从该 cluster 的成员 HyperEdges 动态读取并带出 edge descriptions。
+- `metadata.edge_nodes`：core edge 内的 active member nodes，每个 node 带 `node_id/content/summary/score/channels/score_parts/matched_vector_items/source_turn_ids/triples/time/node_metadata`。
+- `metadata.edge_vector_hits`：Track 2 的 HyperEdge description 向量命中，不再混入 node 的 `matched_vector_items`。
+- `metadata.score_parts`：包含 `rrf_track1`、`rrf_track2`、`track1_rank`、`track2_rank`、`track1_edge_score`、`track2_vector_score` 和 `edge_rrf_score` 等可解释字段。
+- `metadata.cluster_edge_descriptions`：如果 core edge 属于 EdgeCluster，会从该 cluster 的成员 HyperEdges 动态读取 edge descriptions。
+- `metadata.periphery_edges` / `metadata.periphery_nodes`：只由 Top K2 core edges 所属 cluster 带出的 sibling context；periphery 不参与 core edge 排名，也不会继续触发新的 cluster 扩散。
 
 当前仍不接入：
 
@@ -269,7 +280,7 @@ SearchResult 当前结构要点：
 
 - Node summary、LocalTriple 与 description-only HyperEdge description 维护已接入同构节点/边合并路径；更完整的 memory node merge/update/conflict 仍待实现。
 - `state/task/instruction/tool` 已作为标签配置存在，但尚未都有专门构建策略；当前主要依靠 LLM 输出 labels 和统一节点结构承载。`turn` 已从节点标签配置中独立出来，只作为对话记录和来源追踪配置。
-- 检索主流程已接入 node_content（content + summary 拼接）、node-local-graph 和 HyperEdge description 向量召回，但尚未接入 EdgeCluster canonical / variant 向量召回，也未接入 turn_dialogue 向量召回。
+- 检索主流程已接入 node_content（content + summary 拼接）、node-local-graph 和 HyperEdge description 向量召回，并已按 Dual-Track Edge-Level RRF 落地；当前尚未接入 EdgeCluster canonical / variant 向量召回，也未接入 turn_dialogue 向量召回。
 - EdgeCluster 当前保留为确定性锚点聚合视图；检索侧已能在命中 edge 所属 cluster 时带出 sibling edge descriptions 和 sibling edge nodes。`BasicEdgeClusterBuilder` 统一使用 `AnchorKey/AnchorOccurrence` 构建 shared-node 与 semantic-anchor clusters：共享成员 node 形成 `cluster_labels=["shared_node"]`；semantic-anchor cluster 只在不同 HyperEdge 的 active local triples 满足 `subject_subject` 至少 1 次，或 `subject_object/object_subject` 至少 1 次时建立。`edge_clusters.stop_nodes` 中的 normalized 文本（默认 `User`、`Assistant`）作为 subject 参与 `subject_subject` 时不触发 cluster；但 object 与 stop-node subject 的 `subject_object/object_subject` 交叉命中仍可触发。单独 `object_object` 不再建立 semantic cluster。两类 cluster metadata 都记录 `cluster_basis/anchor_value/anchor_occurrences/cluster_reasons`；semantic anchor 额外记录 `anchor_positions`。当前不做相似 cluster 向量召回、LLM cluster merge、后台宏观整理或复杂冲突状态维护。
 - LocalNodeGraph 当前只覆盖 event participants、entity attributes 和 assertion SPO；还没有从事件内部关系、工具调用、任务状态中构建更丰富的局部图。
 
@@ -310,7 +321,7 @@ SearchResult 当前结构要点：
 
 - **检索增强**
   设计方向：lexical + vector + hyperedge + edge cluster + temporal + rerank。
-  当前方案：检索侧已接入 SQLite FTS、node_content（content + summary 拼接）、node-local-graph 与 HyperEdge description 四个排名通道。HyperEdge description 的 edge rank 先投影到其 active member nodes，每个 node 仅使用所属命中 edge 中的最佳 rank 作为该通道分数，再与三个 node 通道统一进入 RRF；RRF nodes 通过 HyperEdge / EdgeCluster 涟漪扩散并返回 top K 条 HyperEdge 及其成员 nodes，不再合并两套独立打分候选。EdgeCluster canonical / variant 向量召回、turn_dialogue 召回、entity alias recall、temporal filter 和 LLM rerank 暂未接入。
+  当前方案：检索侧代码采用 SQLite FTS、node_content（content + summary 拼接）、node-local-graph 与 HyperEdge description。前三路先做 node-level RRF，并通过 incident HyperEdges 形成 Track 1 edge ranking；HyperEdge description 作为 Track 2 直接形成 edge ranking；两路在 edge-level RRF 汇合后 Top K2 剪枝，再做受控 cluster ripple。EdgeCluster canonical / variant 向量召回、turn_dialogue 召回、entity alias recall、temporal filter 和 LLM rerank 暂未接入。
   原因：先完成 query_analysis=false 下的可解释混合召回和 edge-centered 返回，再逐步增加更多召回通道，避免把 query analysis、rerank 和多跳召回同时引入。
 
 - **事件驱动增量抽取**
@@ -385,10 +396,10 @@ SearchResult 当前结构要点：
 - EdgeCluster 当前作为确定性锚点聚合视图，多个 sibling edges 会追加到 shared-node 或 semantic-anchor cluster。
 - SQLite FTS 召回通过 `nodes_fts` 检索 `content/summary/local_graph`。
 - node_content、node-local-graph 两路向量召回接入检索主流程。
-- RRF 分通道统一融合 lexical、node_content vector、node-local-graph vector 和投影到成员节点上的 HyperEdge description vector 初始结果；同一节点属于多条命中 edge 时仅使用最佳 description rank 贡献，使四个通道对单节点严格同幅。
-- HyperEdge description 向量召回不再独立形成后段 HyperEdge 候选或与 node-derived 候选硬合。
-- GraphRippleExpansion 根据 RRF 种子扩散到 HyperEdge 成员、EdgeCluster description variants 和 sibling edge nodes。
-- `edge_coherence` 在同一 HyperEdge 出现多个 seed hits 时产生非线性结构化加分。
+- lexical、node_content vector、node-local-graph vector 三路在 node-level RRF 融合后形成 Track 1 edge ranking。
+- HyperEdge description 向量召回作为 Track 2 直接形成 edge ranking，不再投影到成员节点。
+- Track 1 与 Track 2 在 edge-level RRF 汇合，并在 Top K2 core edges 后才触发 controlled cluster ripple。
+- `edge_coherence` 在同一 HyperEdge 出现多个 seed hits 时作为 Track 1 edge-level multiplier，不写回成员 node 分数。
 - `Memory.search()` 返回 top K 条 HyperEdge，每条 edge 的 `metadata.edge_nodes` 携带成员 nodes 和各 node 的 triples。
 
 常用验证命令：

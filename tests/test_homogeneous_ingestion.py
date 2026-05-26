@@ -1404,10 +1404,16 @@ def test_hyper_edge_description_vector_recall_returns_edge_candidate(tmp_path):
     assert results
     assert results[0]["id"] == edge_record.payload["edge_id"]
     assert "hyper_edge_description_vector" in results[0]["metadata"]["channels"]
-    assert results[0]["metadata"]["score_parts"]["rrf_hyper_edge_description_vector"] == 1 / 11
+    assert results[0]["metadata"]["score_parts"]["rrf_track2"] == 1 / 11
+    assert results[0]["metadata"]["score_parts"]["track2_rank"] == 1
+    assert results[0]["metadata"]["edge_vector_hits"][0]["channel"] == "hyper_edge_description_vector"
+    assert all(
+        "rrf_hyper_edge_description_vector" not in node["score_parts"]
+        for node in results[0]["metadata"]["edge_nodes"]
+    )
 
 
-def test_hyper_edge_description_channel_uses_best_projected_edge_rank_per_node(tmp_path):
+def test_hyper_edge_description_track_stays_edge_level_without_node_projection(tmp_path):
     embedding_client = RecordingEmbeddingClient()
     vector_store = RecordingVectorStore()
     memory = Memory.from_config(
@@ -1447,13 +1453,18 @@ def test_hyper_edge_description_channel_uses_best_projected_edge_rank_per_node(t
         for node in result["metadata"]["edge_nodes"]
         if node["content"] == "Alice prefers morning interviews."
     )
-    assert preference_node["score_parts"]["rrf_hyper_edge_description_vector"] == pytest.approx(1 / 11)
+    assert "rrf_hyper_edge_description_vector" not in preference_node["score_parts"]
+    assert preference_node["matched_vector_items"] == []
+    assert [result["metadata"]["score_parts"]["rrf_track2"] for result in results] == pytest.approx(
+        [1 / 11, 1 / 12]
+    )
     assert {
-        hit["projected_edge_id"]
-        for hit in preference_node["matched_vector_items"]
+        hit["payload"]["edge_id"]
+        for result in results
+        for hit in result["metadata"]["edge_vector_hits"]
         if hit["channel"] == "hyper_edge_description_vector"
     } == {record.payload["edge_id"] for record in edge_records}
-    assert all("edge_coherence" not in result["metadata"]["score_parts"] for result in results)
+    assert all("edge_coherence_bonus" not in result["metadata"]["score_parts"] for result in results)
 
 
 def test_hyperedge_maintenance_reuses_same_member_set_and_reindexes_description(tmp_path):

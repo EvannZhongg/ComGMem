@@ -253,8 +253,7 @@ def _log_touched_graph(
     touched_clusters = [
         cluster
         for cluster in clusters
-        if any(variant.source_edge_id in touched_edge_ids for variant in cluster.description_variants)
-        or _cluster_mentions_edges(cluster, touched_edge_ids)
+        if _cluster_mentions_edges(cluster, touched_edge_ids)
     ]
     logger.info(
         "touched_graph turn_id=%s nodes=%d edges=%d clusters=%d labels=%s",
@@ -292,9 +291,10 @@ def _log_touched_graph(
         logger.info("  ... %d more touched edges", len(touched_edges) - edge_sample)
     for cluster in touched_clusters[:edge_sample]:
         logger.info(
-            "  cluster labels=%s variants=%d description=%s",
+            "  cluster labels=%s basis=%s occurrences=%d description=%s",
             ",".join(cluster.cluster_labels),
-            len(cluster.description_variants),
+            cluster.metadata.get("cluster_basis", ""),
+            len(_anchor_occurrences(cluster)),
             _preview(cluster.canonical_description, 220),
         )
 
@@ -368,13 +368,14 @@ def _source_turn_ids(metadata: dict[str, Any]) -> list[str]:
 
 
 def _cluster_mentions_edges(cluster: Any, edge_ids: set[str]) -> bool:
+    return any(occurrence.get("edge_id") in edge_ids for occurrence in _anchor_occurrences(cluster))
+
+
+def _anchor_occurrences(cluster: Any) -> list[dict[str, Any]]:
     occurrences = cluster.metadata.get("anchor_occurrences")
     if not isinstance(occurrences, list):
-        return False
-    for occurrence in occurrences:
-        if isinstance(occurrence, dict) and occurrence.get("edge_id") in edge_ids:
-            return True
-    return False
+        return []
+    return [occurrence for occurrence in occurrences if isinstance(occurrence, dict)]
 
 
 def _stats_delta(before: dict[str, int], after: dict[str, int]) -> dict[str, int]:

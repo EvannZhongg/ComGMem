@@ -316,7 +316,7 @@ ExtractedEdgeSummary + member nodes -> HyperEdge(description, node_ids)
 | 4 | GraphAssembler 重构 | 已完成 | 按 refs 组装 nodes 和 HyperEdges，并从 context.turn_ids 写入系统来源 metadata。 | `assembly.py`, `node_builder.py`, `hyperedge_builder.py` |
 | 5 | 存储与索引调整 | 已完成 | 新写入不依赖 polarity/roles；来源回溯依赖系统注入的 `source_turn_ids`。 | `sqlite_store.py`, `vector_store.py` |
 | 6 | 维护逻辑泛化 | 部分完成 | Node summary 与 LocalTriple 维护已接入；memory node merge/conflict、description-only edge maintenance 仍待补齐。 | `maintenance.py`, maintenance prompts |
-| 7 | 检索适配 | 已完成 | 检索不依赖 edge_type/relation/roles；description-only edge 排名投影到 active member nodes，并与 node 召回统一进入 RRF。 | `retrieval/*.py` |
+| 7 | 检索适配 | 已完成 | 当前代码已按 Dual-Track Edge-Level RRF 落地：前三路 node recall 形成 Track 1 edge ranking，HED 形成 Track 2 edge ranking，再做 edge-level RRF 与 Top K2 剪枝。 | `retrieval/*.py` |
 | 8 | 配置收敛 | 未开始 | node label policy 与 inferred metadata 配置落地。 | `config.py`, `configs/*.yaml` |
 | 9 | 测试和示例迁移 | 未开始 | 删除旧断言，补齐新结构测试。 | `tests/test_memory.py`, `examples/*.py` |
 | 10 | 旧路径清理 | 未开始 | 移除旧 `entities/events/assertions` 主路径和旧 prompt。 | pipeline/schema/docs |
@@ -357,7 +357,8 @@ ExtractedEdgeSummary + member nodes -> HyperEdge(description, node_ids)
 - 已完成：Node summary 维护第一阶段。同一 node 的不同来源 summary 在低于 `k` 时拼接；达到 `maintenance.node_summary.compact_after_k_sources` 或 token 上限时强触发 LLM 压缩；无维护 LLM 时显式失败。
 - 已完成：LocalTriple 维护第一阶段。同一 node 内先匹配 normalized S；S/P/O 完全相同只合并系统来源 provenance，不触发 LLM；S/P 相同且 O 不同才触发 LLM 路由，支持 keep_existing、keep_new、keep_both、merge、needs_review；无维护 LLM 时显式失败。
 - 已完成：移除当前 EdgeCluster 维护配置入口；EdgeCluster 概念改为共享 `member_node_id` 的 HyperEdge 聚合视图，不包含相似度召回、cluster merge、冲突健康检查或后台维护。
-- 已完成：检索适配。SQLite FTS、node content vector、node local graph vector 与 HyperEdge description vector 作为统一排名通道进入 RRF；HyperEdge 命中按 edge rank 投影到所有 active member nodes，同一 node 位于多条命中 edge 时只使用最佳 rank 的单项 RRF 贡献；图谱扩散和 edge-centered 返回只消费这套统一 node 分数。
+- 已完成：当前检索代码已适配同构节点与 description-only HyperEdge，不再依赖 edge_type/relation/roles；SQLite FTS、node content vector、node local graph vector 与 HyperEdge description vector 已接入。
+- 已完成：Dual-Track Edge-Level RRF 已落地。FTS / node_content / node_local_graph 的 node RRF 结果转换为 Track 1 edge ranking；HED 作为 Track 2 direct edge ranking；最终在 edge-level RRF 汇合并 Top K2 剪枝后再做 controlled cluster ripple。HED 不再投影到 node-level RRF。
 - 未开始：memory node merge/conflict、旧测试迁移、示例迁移。
 
-下一步建议继续 **阶段 6：维护逻辑泛化**，补齐统一 MemoryNode merge/conflict 与 description-only HyperEdge 维护。
+下一步建议继续 **阶段 6：维护逻辑泛化**，补齐统一 MemoryNode merge/conflict 与更完整的 description-only HyperEdge 维护。

@@ -20,8 +20,10 @@
 - lexical recall 候选数。
 - node content / node local graph 向量召回候选数。`node_content` 向量文本由 `MemoryNode.content` 与 `MemoryNode.summary` 拼接生成，不再拆分独立 `node_summary` 向量通道。
 - HyperEdge description 向量召回候选数。
-- RRF 常数 `rrf_k`。
-- RRF 后进入图谱涟漪扩散的 seed 数。
+- node-level RRF 常数 `rrf_k`，用于 Track 1 的 FTS / node_content / node_local_graph 融合。
+- node RRF 后进入 Track 1 图谱种子阶段的 seed 数，记为 `K1`，当前可对应 `graph_seed_top_k`。
+- edge-level RRF 常数 `edge_rrf_k`；当该配置为空时复用 `rrf_k`。
+- edge-level RRF 后保留的核心 HyperEdge 数，记为 `K2`，当前配置为 `edge_core_top_k`；当该配置为空时复用 `final_top_k`。
 - HyperEdge coherence 的 `alpha` / `beta` 权重。
 - 最终返回的 HyperEdge 数量。
 
@@ -30,19 +32,25 @@
 ```text
 Memory.search(query, namespace)
   -> query analysis
-  -> parallel rank channels
+  -> Track 1: node-centric edge ranking
      -> lexical node recall
      -> node_content vector recall
      -> node_local_graph vector recall
+     -> node RRF across lexical / node_content / node_local_graph
+     -> take Top K1 MemoryNodes as Seed Set S
+     -> collect incident HyperEdges from S as E_cand
+     -> score each E_cand with node base score + edge coherence
+     -> produce Track 1 Edge Ranking
+  -> Track 2: edge-centric direct ranking
      -> hyper_edge_description vector recall
-        -> each ranked HyperEdge projects its rank contribution to all active member nodes
-  -> node-level fusion
-     -> Reciprocal Rank Fusion across all four channels
-  -> graph ripple expansion
-     -> seed node -> incident HyperEdge -> all edge member nodes
-     -> incident HyperEdge -> EdgeCluster -> sibling edges and description variants
-     -> HyperEdge coherence scoring
-  -> edge-level ranking
+     -> read active HyperEdges by edge_id
+     -> produce Track 2 Edge Ranking
+  -> Edge-Level RRF
+     -> fuse Track 1 and Track 2 edge rankings by edge_id
+     -> prune to Top K2 core HyperEdges
+  -> controlled cluster ripple
+     -> only clusters attached to Top K2 core HyperEdges may expand
+     -> attach sibling edge descriptions and related active nodes as periphery
   -> final top-k HyperEdges, each carrying member nodes
 ```
 
@@ -54,7 +62,9 @@ Memory.search(query, namespace)
 - `node_local_graph`
 - `hyper_edge_description`
 
-node 向量命中必须通过 payload 中的 `node_id` 回到 SQLite canonical store 读取 `MemoryNode`。HyperEdge description 向量命中必须通过 payload 中的 `edge_id` 回到 SQLite canonical store 读取 `HyperEdge`，并读取其 active 成员 `MemoryNode`，把该 edge 的向量排名投影为这些节点的同量纲 RRF 贡献。向量索引只作为可重建旁路索引，不作为权威数据源。
+node 向量命中必须通过 payload 中的 `node_id` 回到 SQLite canonical store 读取 `MemoryNode`。HyperEdge description 向量命中必须通过 payload 中的 `edge_id` 回到 SQLite canonical store 读取 active `HyperEdge`。向量索引只作为可重建旁路索引，不作为权威数据源。
+
+HyperEdge description 不再投影为 node-level RRF 分数。它作为 Track 2 直接产生 edge ranking，随后与 Track 1 的 node-derived edge ranking 在 edge-level RRF 汇合。
 
 `node_content` 索引文本为 node content 与 node summary 的拼接；当 summary 拼接或压缩维护导致 `MemoryNode.summary` 更新时，写入闭环必须用同一个 node content vector point id 覆盖更新。
 
@@ -64,19 +74,21 @@ node 向量命中必须通过 payload 中的 `node_id` 回到 SQLite canonical s
 
 词法召回应作为独立算法模块，不应把 FTS / BM25 细节写死在检索编排器里。
 
-## 融合策略
+## Track 1: Node-Centric Edge Ranking
 
-当前使用 Reciprocal Rank Fusion。
+Track 1 只消费三路 node 召回：
 
-RRF 常数通过 `retrieval.rrf_k` 显式配置；实现上仍应封装在融合模块中，方便后续替换融合策略。
+- SQLite FTS lexical recall。
+- `node_content` vector recall。
+- `node_local_graph` vector recall。
+
+先对这三路 MemoryNode 排名做 node-level RRF：
 
 ```text
-score(node) =
+S_node(n) =
   1 / (rrf_k + rank_lexical)
   + 1 / (rrf_k + rank_node_content_vector)
   + 1 / (rrf_k + rank_node_local_graph_vector)
-  + max(1 / (rrf_k + rank_hyper_edge_description_vector(edge))
-        for each recalled edge containing node)
 ```
 
 其中：
@@ -84,52 +96,96 @@ score(node) =
 - `rank_lexical` 来自 SQLite FTS 结果排序。
 - `rank_node_content_vector` 来自 node content + summary 向量召回排序。
 - `rank_node_local_graph_vector` 来自 node local graph 向量召回排序。
-- `rank_hyper_edge_description_vector(edge)` 来自 HyperEdge description 向量召回排序；命中的 edge 将排名证据投影到其全部 active 成员节点，而节点只采用所属命中 edge 中的最佳排名贡献。
-- 若节点不属于任何被 HED 通道召回的 active HyperEdge，则该通道对节点的贡献为 `0`。
 - 如果某个节点只出现在一路召回中，只计算该路的 RRF 分数。
 
 每个 node 向量通道内部先按每个节点的最佳向量分数形成该通道排名，再与 lexical 排名做 RRF。
-HyperEdge description 通道按 node 聚合所属命中 edge：同一个节点若属于多条被召回的 HyperEdge，仅其排名最高的 edge 对该节点贡献一次 RRF 分数；所有匹配 edge payload 仍保留用于解释。由此第四通道与其他三个通道一样，对单个节点的基础分上限固定为 `1 / (rrf_k + 1)`。
 
-## 图谱涟漪扩散
+然后取 Top `K1` 个 MemoryNode 作为 Seed Set `S`，通过 `get_incident_edges(namespace, seed_node_ids)` 收集候选边集合 `E_cand`。
 
-统一四通道 RRF 之后，系统取 `graph_seed_top_k` 个高分 MemoryNode 作为图谱种子。因此 HyperEdge description 命中也通过投影后的节点进入同一扩散路径，不形成独立 edge 打分体系。
+Track 1 的 edge score 是边级分数，不回写到 MemoryNode 分数上：
+
+```text
+Score_track1(E) =
+  max(S_node(v) for v in E ∩ S)
+  * (1 + alpha * max(0, N_hit(E) - 1) ^ beta)
+```
+
+其中：
+
+- `E`: 候选 HyperEdge。
+- `S`: Top `K1` seed nodes。
+- `N_hit(E) = |E ∩ S|`。
+- `max(S_node(v) for v in E ∩ S)`: 该边被命中的最强节点证据。
+- `alpha` / `beta`: HyperEdge coherence 参数。
+
+当 `N_hit <= 1` 时，coherence multiplier 为 `1`，不产生多节点相干性增强；当 `N_hit >= 2` 时，多 seed 命中会指数式放大该边的 Track 1 排名信号。
+
+## Track 2: Edge-Centric Direct Ranking
+
+Track 2 只消费 `hyper_edge_description` 向量召回：
+
+```text
+query -> hyper_edge_description vector index -> active HyperEdges
+```
+
+该通道直接产出 HyperEdge ranking。排序来自向量检索结果顺序；原始向量相似度只用于该通道内部排序和解释，不直接与 Track 1 的 edge score 相加。
+
+Track 2 的职责是从“语境描述”直接命中相关 HyperEdge，避免 HED 证据经过成员节点投影后被稀释。
+
+## Edge-Level RRF & Prune
+
+Track 1 和 Track 2 都产出 HyperEdge ranking，因此最终融合发生在 edge-level：
+
+```text
+S_final_edge(E) =
+  1 / (edge_rrf_k + rank_track1(E))
+  + 1 / (edge_rrf_k + rank_track2(E))
+```
+
+如果某条边只出现在一个 Track 中，另一个 Track 的贡献为 `0`。`edge_rrf_k` 为空时复用 `retrieval.rrf_k`。
+
+融合后按 `S_final_edge(E)` 降序排序，并严格截断为 Top `K2` 核心 HyperEdges。`K2` 是控制图谱扩散规模的关键参数；`edge_core_top_k` 为空时复用 `final_top_k`。
+
+## Controlled Cluster Ripple
+
+只有 Top `K2` 核心 HyperEdges 才允许触发 EdgeCluster 扩散。
 
 扩散步骤：
 
-1. 对种子节点调用 `get_incident_edges(...)`，找到它们归属的 HyperEdge。
-2. 将命中 HyperEdge 内的所有 active MemoryNode 加入候选池。
-3. 如果命中 HyperEdge 属于某个 EdgeCluster，读取该 Cluster 的成员 HyperEdges。
-4. 读取该 Cluster 内其他 HyperEdge，并将这些边内的 active MemoryNode 和 description 作为动态检索上下文加入候选池。
+1. 读取 Top `K2` core edges 的 active member nodes，作为核心主线上下文。
+2. 查询这些 core edges 所属的 EdgeCluster。
+3. 读取这些 cluster 内的 sibling HyperEdges。
+4. 将 sibling edge descriptions 和相关 active nodes 作为背景补充 periphery。
 
-涟漪扩散只依赖已有图结构，不分析 query，不做规则化抽取，不做兜底策略。
+约束：
+
+- 只有属于 Top `K2` core edges 的 cluster 才有资格扩散。
+- sibling edges 不反向开启新的 cluster 扩散，避免横向爆炸。
+- periphery 只作为补充上下文，不参与 core edge 的 edge-level RRF 排名。
+- 涟漪扩散只依赖已有图结构，不分析 query，不做规则化抽取，不做兜底策略。
 
 ## Edge Coherence
 
-如果同一条 HyperEdge 中有两个或更多节点同时出现在 RRF 初始候选池中，说明这条边对应的语境更可能是用户问题的故事线。此时对该 HyperEdge 内所有成员节点施加结构化相干性加分。
-
-公式：
+Edge coherence 只属于 Track 1 的 edge ranking 阶段。它衡量一条 HyperEdge 是否同时被多个 node seed 命中。
 
 ```text
-S_coherence(E) =
-  alpha * max(0, N_hit - 1) ^ beta * S_base_avg
+coherence_multiplier(E) =
+  1 + alpha * max(0, N_hit(E) - 1) ^ beta
 ```
 
 其中：
 
 - `E`: 被命中的 HyperEdge。
-- `N_hit`: RRF 初始候选池中属于该边的节点数量。
+- `N_hit(E)`: Top `K1` seed set 中属于该边的节点数量。
 - `alpha`: `retrieval.edge_coherence_alpha`。
 - `beta`: `retrieval.edge_coherence_beta`。
-- `S_base_avg`: 这些命中节点的 RRF 初始平均分。
 
 实现约束：
 
-- `N_hit <= 1` 时，相干性加分为 0。
-- `N_hit >= 2` 时，相干性加分写入 `score_parts.edge_coherence`。
-- `N_hit` 只统计由 lexical / node content vector / node local graph vector 独立命中的 seed nodes。HyperEdge description 命中向成员节点的投影已经构成该通道的基础分，不因一次 edge 命中投影出多个成员而额外触发 coherence。
-- 相干性加分会加到该 HyperEdge 内所有 active 成员节点上，包括由图谱扩散新带出的节点。
-- EdgeCluster 带出的 sibling edge nodes 会进入候选池和 metadata；除非它们所属 HyperEdge 自身满足 2+ seed hits，否则不会凭空获得 `edge_coherence`。
+- `N_hit <= 1` 时 multiplier 为 `1`。
+- `N_hit >= 2` 时 multiplier 放大 Track 1 edge score。
+- HED Track 不参与 `N_hit`，避免一条 HED 命中因为 edge 内有多个成员而制造虚假的多 seed coherence。
+- coherence 不再写回所有成员 node 的分数；它是 edge-level ranking 解释字段。
 
 ## Final Edge Result
 
@@ -143,13 +199,13 @@ S_coherence(E) =
 - `metadata.edge_nodes`: 该 edge 内包含的 MemoryNode 列表
 - `metadata.edge_metadata`: 系统写入的 edge metadata，例如 `source_turn_ids`
 
-Edge-level score 当前来自 edge 内成员 node 在图谱扩散后的最高分：
+Edge-level score 来自 edge-level RRF 后的最终分数：
 
 ```text
-S_edge = max(S_node for node in edge_nodes)
+S_edge = S_final_edge(E)
 ```
 
-其中 `S_node` 已经包含 RRF 分数和可能存在的 `edge_coherence` 分数。这样 `final_top_k` 选择的是最相关的故事线/关系边，再把这些边内的节点整体返回。
+这样 `final_top_k` 选择的是最相关的故事线/关系边，再把这些边内的节点整体返回。
 
 ## 结果边界
 
@@ -157,7 +213,8 @@ S_edge = max(S_node for node in edge_nodes)
 
 - edge identity、description、system metadata。
 - edge-level score 与可解释 score parts。
-- edge 内成员 nodes。
+- core edge 内成员 nodes。
+- cluster ripple 带出的 periphery sibling edge descriptions 和相关 active nodes。
 - 每个 node 的内容、分数来源和 triples；triple 的 HyperEdge 上下文使用 `scope_edge_ids`，同一个 triple 可以保留多个 edge scope。
 - 每个 node 的系统来源字段，例如 `source_turn_ids`、`node_metadata`。
 - 如果 edge 属于 EdgeCluster，附带 cluster id，以及从 cluster member HyperEdges 动态读取的 edge descriptions。
