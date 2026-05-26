@@ -51,6 +51,8 @@ def test_default_config_uses_global_token_counting_config():
     assert models_raw["nlp"]["model_path"] == "models/en_core_web_sm"
     assert config.retrieval.rrf_k == 60
     assert config.retrieval.hyper_edge_description_vector_top_k == 10
+    assert config.retrieval.cluster_periphery_edge_limit == 20
+    assert config.retrieval.cluster_periphery_node_limit == 50
     assert config.edge_clusters.stop_nodes == ["User", "Assistant"]
     assert "description_variants_limit" not in default_raw["edge_clusters"]
     assert not hasattr(config.edge_clusters, "description_variants_limit")

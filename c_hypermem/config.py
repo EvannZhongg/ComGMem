@@ -135,6 +135,8 @@ class RetrievalConfig(BaseModel):
     hyper_edge_description_vector_top_k: int = 10
     graph_seed_top_k: int = 80
     edge_core_top_k: int | None = None
+    cluster_periphery_edge_limit: int | None = 20
+    cluster_periphery_node_limit: int | None = 50
     edge_coherence_alpha: float = 0.5
     edge_coherence_beta: float = 2.0
     final_top_k: int = 10

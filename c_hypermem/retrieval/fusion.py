@@ -5,9 +5,6 @@ from dataclasses import dataclass, field
 from c_hypermem.schema import MemoryNode
 
 
-RRF_K = 60
-
-
 @dataclass
 class FusedNode:
     node: MemoryNode
@@ -39,7 +36,7 @@ def reciprocal_rank_fusion_channels(
     *,
     ranked_lists: list[RankedNodeList],
     vector_hit_payloads: dict[str, list[dict[str, object]]] | None = None,
-    k: int = RRF_K,
+    k: int,
 ) -> list[FusedNode]:
     fused: dict[str, FusedNode] = {}
     payloads = vector_hit_payloads or {}

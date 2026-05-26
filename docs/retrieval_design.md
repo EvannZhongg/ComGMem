@@ -24,6 +24,8 @@
 - node RRF 后进入 Track 1 图谱种子阶段的 seed 数，记为 `K1`，当前可对应 `graph_seed_top_k`。
 - edge-level RRF 常数 `edge_rrf_k`；当该配置为空时复用 `rrf_k`。
 - edge-level RRF 后保留的核心 HyperEdge 数，记为 `K2`，当前配置为 `edge_core_top_k`；当该配置为空时复用 `final_top_k`。
+- controlled cluster ripple 每条 core edge 可附加的 sibling edge 数量上限，当前配置为 `cluster_periphery_edge_limit`。
+- controlled cluster ripple 每条 core edge 可附加的 periphery node 数量上限，当前配置为 `cluster_periphery_node_limit`。
 - HyperEdge coherence 的 `alpha` / `beta` 权重。
 - 最终返回的 HyperEdge 数量。
 
@@ -146,6 +148,15 @@ S_final_edge(E) =
 
 融合后按 `S_final_edge(E)` 降序排序，并严格截断为 Top `K2` 核心 HyperEdges。`K2` 是控制图谱扩散规模的关键参数；`edge_core_top_k` 为空时复用 `final_top_k`。
 
+如果某条边缺失某个 Track 命中，该 Track 的 RRF 贡献显式为 `0`，等价于该 Track rank 为正无穷。若一条边同时出现在 Track 1 和 Track 2，则两路 RRF 贡献相加。
+
+Top K2 剪枝前的排序必须是确定性的。同分时按以下顺序打破平局：
+
+1. `S_final_edge(E)`。
+2. Track 2 HyperEdge description 向量相似度。
+3. Track 1 edge score。
+4. `edge_id` 字典序，作为完全同分时的稳定排序键。
+
 ## Controlled Cluster Ripple
 
 只有 Top `K2` 核心 HyperEdges 才允许触发 EdgeCluster 扩散。
@@ -161,6 +172,8 @@ S_final_edge(E) =
 
 - 只有属于 Top `K2` core edges 的 cluster 才有资格扩散。
 - sibling edges 不反向开启新的 cluster 扩散，避免横向爆炸。
+- 每条 core edge 最多附加 `cluster_periphery_edge_limit` 条 sibling edges；为空表示不限制，`0` 表示不附加。
+- 每条 core edge 最多附加 `cluster_periphery_node_limit` 个 periphery nodes；为空表示不限制，`0` 表示不附加。
 - periphery 只作为补充上下文，不参与 core edge 的 edge-level RRF 排名。
 - 涟漪扩散只依赖已有图结构，不分析 query，不做规则化抽取，不做兜底策略。
 
@@ -176,7 +189,7 @@ coherence_multiplier(E) =
 其中：
 
 - `E`: 被命中的 HyperEdge。
-- `N_hit(E)`: Top `K1` seed set 中属于该边的节点数量。
+- `N_hit(E)`: Top `K1` seed set 中属于该边的唯一 `node_id` 数量。
 - `alpha`: `retrieval.edge_coherence_alpha`。
 - `beta`: `retrieval.edge_coherence_beta`。
 
@@ -184,6 +197,7 @@ coherence_multiplier(E) =
 
 - `N_hit <= 1` 时 multiplier 为 `1`。
 - `N_hit >= 2` 时 multiplier 放大 Track 1 edge score。
+- 同一个 `node_id` 即使被多个 query token、别名或召回通道命中，也只能对 `N_hit` 贡献 1。
 - HED Track 不参与 `N_hit`，避免一条 HED 命中因为 edge 内有多个成员而制造虚假的多 seed coherence。
 - coherence 不再写回所有成员 node 的分数；它是 edge-level ranking 解释字段。
 

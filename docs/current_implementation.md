@@ -215,12 +215,14 @@ retrieval:
   hyper_edge_description_vector_top_k: 10
   graph_seed_top_k: 80
   edge_core_top_k:
+  cluster_periphery_edge_limit: 20
+  cluster_periphery_node_limit: 50
   edge_coherence_alpha: 0.5
   edge_coherence_beta: 2.0
   final_top_k: 10
 ```
 
-`edge_rrf_k: null` 表示复用 `rrf_k`；`edge_core_top_k: null` 表示复用 `final_top_k` 作为 K2。`final_top_k` 控制最终返回的核心 HyperEdge 数量，不是 MemoryNode 数量。
+`edge_rrf_k: null` 表示复用 `rrf_k`；`edge_core_top_k: null` 表示复用 `final_top_k` 作为 K2。`cluster_periphery_edge_limit` 和 `cluster_periphery_node_limit` 控制每条 core edge 能带出的外围 sibling edges 与 periphery nodes；设为 `null` 表示不限制，设为 `0` 表示不附加。`final_top_k` 控制最终返回的核心 HyperEdge 数量，不是 MemoryNode 数量。
 
 Track 1 的 edge coherence 使用乘法器：
 
@@ -240,6 +242,8 @@ S_final_edge(E) =
   + 1 / (edge_rrf_k + rank_track2(E))
 ```
 
+缺失 Track 的 RRF 贡献在 `score_parts` 中显式记为 `0.0`，双轨同时命中时两路贡献相加。Top K2 剪枝前使用确定性排序：`edge_rrf_score` 降序、Track 2 `track2_vector_score` 降序、Track 1 `track1_edge_score` 降序、`edge_id` 升序。
+
 SearchResult 当前结构要点：
 
 - `id`：`edge_id`。
@@ -248,9 +252,9 @@ SearchResult 当前结构要点：
 - `metadata.edge_metadata`：系统写入的 edge metadata，例如 `source_turn_ids`。
 - `metadata.edge_nodes`：core edge 内的 active member nodes，每个 node 带 `node_id/content/summary/score/channels/score_parts/matched_vector_items/source_turn_ids/triples/time/node_metadata`。
 - `metadata.edge_vector_hits`：Track 2 的 HyperEdge description 向量命中，不再混入 node 的 `matched_vector_items`。
-- `metadata.score_parts`：包含 `rrf_track1`、`rrf_track2`、`track1_rank`、`track2_rank`、`track1_edge_score`、`track2_vector_score` 和 `edge_rrf_score` 等可解释字段。
+- `metadata.score_parts`：包含 `rrf_track1`、`rrf_track2`、`track1_rank`、`track2_rank`、`track1_edge_score`、`track2_vector_score`、`edge_rrf_score` 和 tie-breaker 分数等可解释字段。
 - `metadata.cluster_edge_descriptions`：如果 core edge 属于 EdgeCluster，会从该 cluster 的成员 HyperEdges 动态读取 edge descriptions。
-- `metadata.periphery_edges` / `metadata.periphery_nodes`：只由 Top K2 core edges 所属 cluster 带出的 sibling context；periphery 不参与 core edge 排名，也不会继续触发新的 cluster 扩散。
+- `metadata.periphery_edges` / `metadata.periphery_nodes`：只由 Top K2 core edges 所属 cluster 带出的 sibling context，并受 `cluster_periphery_edge_limit` / `cluster_periphery_node_limit` 限制；periphery 不参与 core edge 排名，也不会继续触发新的 cluster 扩散。
 
 当前仍不接入：
 
@@ -399,7 +403,7 @@ SearchResult 当前结构要点：
 - lexical、node_content vector、node-local-graph vector 三路在 node-level RRF 融合后形成 Track 1 edge ranking。
 - HyperEdge description 向量召回作为 Track 2 直接形成 edge ranking，不再投影到成员节点。
 - Track 1 与 Track 2 在 edge-level RRF 汇合，并在 Top K2 core edges 后才触发 controlled cluster ripple。
-- `edge_coherence` 在同一 HyperEdge 出现多个 seed hits 时作为 Track 1 edge-level multiplier，不写回成员 node 分数。
+- `edge_coherence` 在同一 HyperEdge 出现多个唯一 `node_id` seed hits 时作为 Track 1 edge-level multiplier，不写回成员 node 分数。
 - `Memory.search()` 返回 top K 条 HyperEdge，每条 edge 的 `metadata.edge_nodes` 携带成员 nodes 和各 node 的 triples。
 
 常用验证命令：

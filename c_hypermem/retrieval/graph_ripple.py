@@ -44,7 +44,9 @@ class GraphRippleExpansion:
         if not seeds:
             return []
 
-        seed_scores = {item.node.node_id: item.score for item in seeds}
+        seed_scores: dict[str, float] = {}
+        for item in seeds:
+            seed_scores[item.node.node_id] = max(seed_scores.get(item.node.node_id, float("-inf")), item.score)
         seed_ids = set(seed_scores)
         incident_edges = [
             edge
@@ -54,7 +56,11 @@ class GraphRippleExpansion:
         if not incident_edges:
             return []
 
-        by_node_id = {item.node.node_id: item for item in node_ranking}
+        by_node_id: dict[str, FusedNode] = {}
+        for item in node_ranking:
+            existing = by_node_id.get(item.node.node_id)
+            if existing is None or item.score > existing.score:
+                by_node_id[item.node.node_id] = item
         nodes_by_id = self._load_nodes(namespace, incident_edges, by_node_id)
         ranked: list[Track1RankedEdge] = []
         for edge in incident_edges:
@@ -106,6 +112,7 @@ class GraphRippleExpansion:
             edges_by_id,
             clusters_by_core_edge,
             set(core_edge_ids),
+            self._cluster_periphery_edge_limit(),
         )
         periphery_nodes_by_core_edge = self._periphery_nodes_by_core_edge(
             namespace,
@@ -133,6 +140,14 @@ class GraphRippleExpansion:
                 )
             )
         return enriched
+
+    def _cluster_periphery_edge_limit(self) -> int | None:
+        configured = self.config.cluster_periphery_edge_limit
+        return None if configured is None else max(0, configured)
+
+    def _cluster_periphery_node_limit(self) -> int | None:
+        configured = self.config.cluster_periphery_node_limit
+        return None if configured is None else max(0, configured)
 
     def materialize_edge_nodes(
         self,
@@ -214,10 +229,14 @@ class GraphRippleExpansion:
         core_node_ids_by_edge = {item.edge.edge_id: set(item.edge.node_ids) for item in ranked_edges}
 
         result: dict[str, list[FusedNode]] = {}
+        node_limit = self._cluster_periphery_node_limit()
         for core_edge_id, payloads in periphery_edges_by_core.items():
             core_node_ids = core_node_ids_by_edge.get(core_edge_id, set())
             seen_nodes: set[str] = set()
             items: list[FusedNode] = []
+            if node_limit == 0:
+                result[core_edge_id] = items
+                continue
             for payload in payloads:
                 edge = edges_by_id.get(str(payload.get("edge_id") or ""))
                 if edge is None:
@@ -240,6 +259,10 @@ class GraphRippleExpansion:
                             cluster_ids=set(),
                         )
                     )
+                    if node_limit is not None and len(items) >= node_limit:
+                        break
+                if node_limit is not None and len(items) >= node_limit:
+                    break
             result[core_edge_id] = items
         return result
 
@@ -264,6 +287,7 @@ def _periphery_edges_by_core_edge(
     edges_by_id: dict[str, HyperEdge],
     clusters_by_core_edge: dict[str, list[EdgeCluster]],
     core_edge_ids: set[str],
+    edge_limit: int | None,
 ) -> dict[str, list[dict[str, object]]]:
     edge_ids_by_cluster: dict[str, list[str]] = {}
     for member in members:
@@ -275,6 +299,9 @@ def _periphery_edges_by_core_edge(
     for core_edge_id, clusters in clusters_by_core_edge.items():
         seen: set[tuple[str, str]] = set()
         payloads: list[dict[str, object]] = []
+        if edge_limit == 0:
+            result[core_edge_id] = payloads
+            continue
         for cluster in clusters:
             for related_edge_id in edge_ids_by_cluster.get(cluster.cluster_id, []):
                 if related_edge_id in core_edge_ids:
@@ -295,6 +322,10 @@ def _periphery_edges_by_core_edge(
                         "edge_metadata": edge.metadata,
                     }
                 )
+                if edge_limit is not None and len(payloads) >= edge_limit:
+                    break
+            if edge_limit is not None and len(payloads) >= edge_limit:
+                break
         result[core_edge_id] = payloads
     return result
 

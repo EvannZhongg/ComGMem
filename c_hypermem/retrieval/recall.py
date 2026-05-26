@@ -173,6 +173,8 @@ class Retriever:
             track1_edge_ids=[item.edge.edge_id for item in track1_edges],
             track2_edge_ids=[item.edge.edge_id for item in track2_edges],
             k=edge_rrf_k,
+            track1_tiebreak_scores={item.edge.edge_id: item.score for item in track1_edges},
+            track2_tiebreak_scores={item.edge.edge_id: item.score for item in track2_edges},
         )
         ranked: list[RankedEdge] = []
         for rrf_result in rrf_results:
