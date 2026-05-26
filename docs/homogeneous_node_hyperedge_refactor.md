@@ -154,8 +154,8 @@ ExtractedEdgeSummary + member nodes -> HyperEdge(description, node_ids)
   - `subject entity + fact state edge`
 - EdgeClusterBuilder 不再依赖 `edge.edge_type == state/correction`，也不再按 description 相似度、topic hint 或后台 merge 维护 cluster。当前概念应收敛为确定性锚点聚合：
   - 两条 HyperEdge 只要共享至少一个 `member_node_id`，就属于同一 EdgeCluster 视图。
-  - 已扩展为 local-triple semantic anchor 聚合：两条 HyperEdge 的成员 node 下 active triples 如果出现 normalized subject/object 端点重合，也可以进入 EdgeCluster。例如 `S1-P1-O1` 与 `S2-P2-O2` 中 `O1 == S2`，保持原 triples 单跳不变，同时建立 `semantic_anchor` cluster。
-  - 端点锚点 reason 包括 `subject_subject`、`object_object`、`subject_object`、`object_subject`。如果两条 edge 同时共享 member node 且命中多个 triple anchor，应记录多个 `cluster_reasons` / anchor metadata，并对 `EdgeClusterMember(cluster_id, edge_id)` 去重。
+  - 已扩展为 local-triple semantic anchor 聚合：两条 HyperEdge 的成员 node 下 active triples 如果出现符合 eligibility 的 normalized subject/object 端点重合，也可以进入 EdgeCluster。例如 `S1-P1-O1` 与 `S2-P2-O2` 中 `O1 == S2`，保持原 triples 单跳不变，同时建立 `semantic_anchor` cluster。
+  - 端点锚点 eligibility：`subject_object` / `object_subject` 命中至少 1 次，或同一 edge pair 上 `subject_subject` 命中至少 2 个文本不同的 normalized subject；单独 `object_object` 不再建立 cluster。如果两条 edge 同时共享 member node 且命中多个 eligible triple anchor，应记录多个 `cluster_reasons` / anchor metadata，并对 `EdgeClusterMember(cluster_id, edge_id)` 去重。
   - EdgeCluster 不合并 HyperEdge，也不判断支持、更新、冲突关系。
   - EdgeCluster 的来源应来自成员 edge 的系统 metadata，而不是 LLM 输出的关系字段。
 

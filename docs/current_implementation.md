@@ -34,7 +34,7 @@
 
 - `MemoryNode`：统一节点结构，使用 `node_labels` 表达语义类型。
 - `HyperEdge`：具体高阶关系实例，核心字段已收敛到 description、member node ids、metadata、time/status/member policy 等；`edge_type/relation/polarity/roles` 已不再是 Pydantic schema 核心字段。
-- `EdgeCluster`：确定性锚点聚合视图，不强制合并边，不做相似度聚类或后台维护。当前锚点包括共享成员节点，以及 active local triples 的 subject/object 端点重合。
+- `EdgeCluster`：确定性锚点聚合视图，不强制合并边，不做相似度聚类或后台维护。当前锚点包括共享成员节点，以及符合 eligibility 的 active local triples subject/object 端点重合。
 - `LocalNodeGraph`：所有节点共享的局部图结构，只包含统一 triples；旧 `attributes/roles` 已从 schema 移除。
 - `ExtractedNode`：新的抽取节点候选，包含 `ref/labels/canonical_text/summaries/triples/edge_summary_refs/metadata`。节点构建时间由系统写入，不由 LLM 输出。
 - `ExtractedEdgeSummary`：新的抽取边摘要候选，包含 `ref/description/metadata`。
@@ -272,7 +272,7 @@ SearchResult 当前结构要点：
 - Node summary、LocalTriple 与 description-only HyperEdge description 维护已接入同构节点/边合并路径；更完整的 memory node merge/update/conflict 仍待实现。
 - `state/task/instruction/tool` 已作为标签配置存在，但尚未都有专门构建策略；当前主要依靠 LLM 输出 labels 和统一节点结构承载。`turn` 已从节点标签配置中独立出来，只作为对话记录和来源追踪配置。
 - 检索主流程已接入 node_content（content + summary 拼接）、node-local-graph 和 HyperEdge description 向量召回，但尚未接入 EdgeCluster canonical / variant 向量召回，也未接入 turn_dialogue 向量召回。
-- EdgeCluster 当前保留为确定性锚点聚合视图；检索侧已能在命中 edge 所属 cluster 时带出 `description_variants` 和 sibling edge nodes。`BasicEdgeClusterBuilder` 统一使用 `AnchorKey/AnchorOccurrence` 构建 shared-node 与 semantic-anchor clusters：共享成员 node 形成 `cluster_labels=["shared_node"]`，edge 成员 nodes 的 active local triples 中 normalized subject/object 端点重合形成 `cluster_labels=["semantic_anchor"]`。两类 cluster metadata 都记录 `cluster_basis/anchor_value/anchor_occurrences/cluster_reasons`；semantic anchor 额外记录 `anchor_positions`。当前不做相似 cluster 向量召回、LLM cluster merge、后台宏观整理或复杂冲突状态维护。
+- EdgeCluster 当前保留为确定性锚点聚合视图；检索侧已能在命中 edge 所属 cluster 时带出 `description_variants` 和 sibling edge nodes。`BasicEdgeClusterBuilder` 统一使用 `AnchorKey/AnchorOccurrence` 构建 shared-node 与 semantic-anchor clusters：共享成员 node 形成 `cluster_labels=["shared_node"]`；semantic-anchor cluster 只在不同 HyperEdge 的 active local triples 满足 `subject_object/object_subject` 至少 1 次，或同一 edge pair 上 `subject_subject` 命中至少 2 个文本不同的 normalized subject 时建立。单独 `object_object` 不再建立 semantic cluster。两类 cluster metadata 都记录 `cluster_basis/anchor_value/anchor_occurrences/cluster_reasons`；semantic anchor 额外记录 `anchor_positions`。当前不做相似 cluster 向量召回、LLM cluster merge、后台宏观整理或复杂冲突状态维护。
 - LocalNodeGraph 当前只覆盖 event participants、entity attributes 和 assertion SPO；还没有从事件内部关系、工具调用、任务状态中构建更丰富的局部图。
 
 ## 9. 设计仍不明确时的轻量替代方案
@@ -297,7 +297,7 @@ SearchResult 当前结构要点：
 - **EdgeCluster 聚合**  
   设计方向：共享 `member_node_id` 的 HyperEdges 进入同一 EdgeCluster 视图；不同 edge 下成员 node 的 active triples 如果 subject/object 端点规范化后相同，也进入 EdgeCluster，用于检索时带出 sibling edges。  
   当前方案：不保留 EdgeCluster 维护配置，不做相似度召回、LLM cluster merge、冲突健康检查或后台整理。
-  当前实现：保持 triples 单跳形态，不改写 `S-P-O`；为同一 normalized endpoint value 生成 deterministic semantic anchor fingerprint；同一 edge pair 同时命中共享 node 和多个 triple anchors 时，保留 `cluster_reasons` / anchor metadata，并对 cluster members 去重。由于 cluster 以 anchor value 为单位，`subject_subject/object_object/subject_object/object_subject` 会折叠为同一个 `semantic_anchor` cluster 的多个 reason。
+  当前实现：保持 triples 单跳形态，不改写 `S-P-O`；为符合 eligibility 的 normalized endpoint value 生成 deterministic semantic anchor fingerprint；同一 edge pair 同时命中共享 node 和多个 triple anchors 时，保留 `cluster_reasons` / anchor metadata，并对 cluster members 去重。semantic-anchor eligibility 为：`subject_object/object_subject` 至少 1 次，或同一 edge pair 上 `subject_subject` 命中至少 2 个文本不同的 normalized subject；单独 `object_object` 不成立。
   原因：EdgeCluster 先承担轻量组织视图；语义合并和冲突判断应留在具体 HyperEdge / MemoryNode 维护链路里。
 
 - **LocalNodeGraph 丰富度**

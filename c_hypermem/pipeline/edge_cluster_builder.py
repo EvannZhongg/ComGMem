@@ -135,34 +135,39 @@ class BasicEdgeClusterBuilder:
         occurrences_by_anchor: dict["AnchorKey", list["AnchorOccurrence"]],
         edges_by_id: dict[str, HyperEdge],
     ) -> None:
+        semantic_occurrences: dict[AnchorKey, list[AnchorOccurrence]] = {}
         current_occurrences = _semantic_anchor_occurrences_from_nodes(edges, nodes)
         for occurrence in current_occurrences:
-            occurrences_by_anchor.setdefault(_anchor_key(occurrence), []).append(occurrence)
+            semantic_occurrences.setdefault(_anchor_key(occurrence), []).append(occurrence)
 
         endpoint_values = sorted({occurrence.anchor_value for occurrence in current_occurrences})
-        if self.store is None or not endpoint_values:
-            return
+        if self.store is not None and endpoint_values:
+            current_edge_ids = {edge.edge_id for edge in edges}
+            endpoint_value_set = set(endpoint_values)
+            for record in self.store.find_triples_by_endpoints(context.namespace, endpoint_values):
+                for position, value in (("subject", record.subject), ("object", record.object)):
+                    anchor_value = normalize_text(value)
+                    if not anchor_value or anchor_value not in endpoint_value_set:
+                        continue
+                    if not record.scope_edge_id or record.scope_edge_id in current_edge_ids:
+                        continue
+                    occurrence = AnchorOccurrence(
+                        basis="semantic_anchor",
+                        anchor_value=anchor_value,
+                        edge_id=record.scope_edge_id,
+                        node_id=record.owner_node_id,
+                        triple_id=record.triple_id,
+                        position=position,
+                        subject=record.subject,
+                        object=record.object,
+                    )
+                    semantic_occurrences.setdefault(_anchor_key(occurrence), []).append(occurrence)
 
-        current_edge_ids = {edge.edge_id for edge in edges}
-        endpoint_value_set = set(endpoint_values)
-        for record in self.store.find_triples_by_endpoints(context.namespace, endpoint_values):
-            for position, value in (("subject", record.subject), ("object", record.object)):
-                anchor_value = normalize_text(value)
-                if not anchor_value or anchor_value not in endpoint_value_set:
-                    continue
-                if not record.scope_edge_id or record.scope_edge_id in current_edge_ids:
-                    continue
-                occurrence = AnchorOccurrence(
-                    basis="semantic_anchor",
-                    anchor_value=anchor_value,
-                    edge_id=record.scope_edge_id,
-                    node_id=record.owner_node_id,
-                    triple_id=record.triple_id,
-                    position=position,
-                    subject=record.subject,
-                    object=record.object,
-                )
-                occurrences_by_anchor.setdefault(_anchor_key(occurrence), []).append(occurrence)
+        eligible_by_anchor = _eligible_semantic_anchor_occurrences_by_anchor(semantic_occurrences)
+        for key, occurrences in eligible_by_anchor.items():
+            eligible = _unique_anchor_occurrences(occurrences)
+            if eligible:
+                occurrences_by_anchor.setdefault(key, []).extend(eligible)
 
     def _load_missing_edges(
         self,
@@ -403,6 +408,64 @@ def _anchor_reasons(key: AnchorKey, occurrences: list[AnchorOccurrence]) -> list
                 for right_position in positions_by_edge[right_edge_id]:
                     reasons.add(f"{left_position}_{right_position}")
     return sorted(reasons)
+
+
+def _eligible_semantic_anchor_occurrences_by_anchor(
+    occurrences_by_anchor: dict[AnchorKey, list[AnchorOccurrence]],
+) -> dict[AnchorKey, list[AnchorOccurrence]]:
+    unique_by_anchor = {
+        key: _unique_anchor_occurrences(occurrences)
+        for key, occurrences in occurrences_by_anchor.items()
+    }
+    all_occurrences = [
+        occurrence
+        for occurrences in unique_by_anchor.values()
+        for occurrence in occurrences
+    ]
+    by_pair: dict[tuple[str, str], list[tuple[str, AnchorOccurrence, AnchorOccurrence]]] = {}
+    by_edge: dict[str, list[AnchorOccurrence]] = {}
+    for occurrence in all_occurrences:
+        if occurrence.position in {"subject", "object"}:
+            by_edge.setdefault(occurrence.edge_id, []).append(occurrence)
+
+    edge_ids = sorted(by_edge)
+    for left_index, left_edge_id in enumerate(edge_ids):
+        for right_edge_id in edge_ids[left_index + 1:]:
+            pair_key = (left_edge_id, right_edge_id)
+            for left_occurrence in by_edge[left_edge_id]:
+                for right_occurrence in by_edge[right_edge_id]:
+                    reason = f"{left_occurrence.position}_{right_occurrence.position}"
+                    by_pair.setdefault(pair_key, []).append((reason, left_occurrence, right_occurrence))
+
+    eligible_occurrences: dict[AnchorKey, dict[tuple[str, str | None, str | None], AnchorOccurrence]] = {}
+    for pair_hits in by_pair.values():
+        subject_cross_hits = [
+            hit for hit in pair_hits if hit[0] in {"subject_object", "object_subject"}
+        ]
+        subject_subject_hits = [
+            hit for hit in pair_hits
+            if hit[0] == "subject_subject"
+        ]
+        subject_subject_anchor_values = {
+            hit[1].anchor_value
+            for hit in subject_subject_hits
+        }
+        eligible_hits = []
+        if subject_cross_hits:
+            eligible_hits.extend(subject_cross_hits)
+        if len(subject_subject_anchor_values) >= 2:
+            eligible_hits.extend(subject_subject_hits)
+        for _, left_occurrence, right_occurrence in eligible_hits:
+            for occurrence in (left_occurrence, right_occurrence):
+                key = _anchor_key(occurrence)
+                eligible_occurrences.setdefault(key, {})[
+                    (occurrence.edge_id, occurrence.triple_id, occurrence.position)
+                ] = occurrence
+
+    return {
+        key: [items[item_key] for item_key in sorted(items)]
+        for key, items in eligible_occurrences.items()
+    }
 
 
 def _merge_anchor_metadata(existing: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:

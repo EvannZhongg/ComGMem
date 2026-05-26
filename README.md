@@ -30,12 +30,6 @@ CHYPERMEM_EMBEDDING_BASE_URL=...
 CHYPERMEM_EMBEDDING_API_KEY=...
 ```
 
-运行测试：
-
-```powershell
-python -m pytest -q
-```
-
 ## Git 后续提交操作流程
 
 假设你的本地仓库已经和远程仓库关联好了（即 `origin/main` 已经设置）。

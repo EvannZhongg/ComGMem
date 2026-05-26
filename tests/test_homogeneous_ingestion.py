@@ -190,6 +190,170 @@ def test_edge_cluster_groups_edges_with_semantic_anchor_from_local_triples(tmp_p
     assert {member.edge_id for member in semantic_members} == {edge.edge_id for edge in edges}
 
 
+def test_edge_cluster_does_not_group_semantic_anchor_from_object_object_only(tmp_path):
+    memory = Memory.from_config(
+        {"storage": {"path": str(tmp_path / "memory.sqlite3")}},
+        extractor=SequenceHomogeneousExtractor(
+            [
+                {
+                    "edge_summaries": [{"ref": "e1", "description": "Alice owns Project Atlas."}],
+                    "nodes": [
+                        {
+                            "ref": "n1",
+                            "labels": ["fact"],
+                            "canonical_text": "Alice owns Project Atlas.",
+                            "summaries": ["Alice owns Project Atlas."],
+                            "triples": [{"subject": "Alice", "predicate": "owns", "object": "Project Atlas"}],
+                            "edge_summary_refs": ["e1"],
+                        }
+                    ],
+                },
+                {
+                    "edge_summaries": [{"ref": "e2", "description": "Bob manages Project Atlas."}],
+                    "nodes": [
+                        {
+                            "ref": "n2",
+                            "labels": ["fact"],
+                            "canonical_text": "Bob manages Project Atlas.",
+                            "summaries": ["Bob manages Project Atlas."],
+                            "triples": [{"subject": "Bob", "predicate": "manages", "object": "Project Atlas"}],
+                            "edge_summary_refs": ["e2"],
+                        }
+                    ],
+                },
+            ]
+        ),
+    )
+    namespace = "object_object_only_no_semantic_cluster_ns"
+    memory.reset(namespace)
+
+    memory.add_memory("Alice owns Project Atlas.", namespace=namespace)
+    memory.add_memory("Bob manages Project Atlas.", namespace=namespace)
+    clusters = memory.store.list_edge_clusters(namespace)
+    memory.close()
+
+    semantic_clusters = [cluster for cluster in clusters if cluster.cluster_labels == ["semantic_anchor"]]
+    assert semantic_clusters == []
+
+
+def test_edge_cluster_does_not_group_subject_subject_when_same_subject_repeats(tmp_path):
+    memory = Memory.from_config(
+        {"storage": {"path": str(tmp_path / "memory.sqlite3")}},
+        extractor=SequenceHomogeneousExtractor(
+            [
+                {
+                    "edge_summaries": [{"ref": "e1", "description": "Alice's work profile."}],
+                    "nodes": [
+                        {
+                            "ref": "n1",
+                            "labels": ["fact"],
+                            "canonical_text": "Alice's work profile.",
+                            "summaries": ["Alice has work profile details."],
+                            "triples": [
+                                {"subject": "Alice", "predicate": "has_role", "object": "analyst"},
+                                {"subject": "Alice", "predicate": "uses_tool", "object": "Todoist"},
+                            ],
+                            "edge_summary_refs": ["e1"],
+                        }
+                    ],
+                },
+                {
+                    "edge_summaries": [{"ref": "e2", "description": "Alice's planning profile."}],
+                    "nodes": [
+                        {
+                            "ref": "n2",
+                            "labels": ["fact"],
+                            "canonical_text": "Alice's planning profile.",
+                            "summaries": ["Alice has planning profile details."],
+                            "triples": [
+                                {"subject": "Alice", "predicate": "has_degree", "object": "Business Administration"},
+                                {"subject": "Alice", "predicate": "tracks_expenses_with", "object": "Mint"},
+                            ],
+                            "edge_summary_refs": ["e2"],
+                        }
+                    ],
+                },
+            ]
+        ),
+    )
+    namespace = "subject_subject_same_subject_repeats_no_cluster_ns"
+    memory.reset(namespace)
+
+    memory.add_memory("Alice has a work profile.", namespace=namespace)
+    memory.add_memory("Alice has a planning profile.", namespace=namespace)
+    edges = memory.store.list_edges(namespace)
+    clusters = memory.store.list_edge_clusters(namespace)
+    semantic_clusters = [cluster for cluster in clusters if cluster.cluster_labels == ["semantic_anchor"]]
+    memory.close()
+
+    assert len(edges) == 2
+    assert semantic_clusters == []
+
+
+def test_edge_cluster_groups_subject_subject_after_two_distinct_subjects_for_same_pair(tmp_path):
+    memory = Memory.from_config(
+        {"storage": {"path": str(tmp_path / "memory.sqlite3")}},
+        extractor=SequenceHomogeneousExtractor(
+            [
+                {
+                    "edge_summaries": [{"ref": "e1", "description": "Alice and Bob work profile."}],
+                    "nodes": [
+                        {
+                            "ref": "n1",
+                            "labels": ["fact"],
+                            "canonical_text": "Alice and Bob work profile.",
+                            "summaries": ["Alice and Bob have work profile details."],
+                            "triples": [
+                                {"subject": "Alice", "predicate": "has_role", "object": "analyst"},
+                                {"subject": "Bob", "predicate": "has_role", "object": "designer"},
+                            ],
+                            "edge_summary_refs": ["e1"],
+                        }
+                    ],
+                },
+                {
+                    "edge_summaries": [{"ref": "e2", "description": "Alice and Bob planning profile."}],
+                    "nodes": [
+                        {
+                            "ref": "n2",
+                            "labels": ["fact"],
+                            "canonical_text": "Alice and Bob planning profile.",
+                            "summaries": ["Alice and Bob have planning profile details."],
+                            "triples": [
+                                {"subject": "Alice", "predicate": "has_degree", "object": "Business Administration"},
+                                {"subject": "Bob", "predicate": "uses_tool", "object": "Mint"},
+                            ],
+                            "edge_summary_refs": ["e2"],
+                        }
+                    ],
+                },
+            ]
+        ),
+    )
+    namespace = "subject_subject_two_distinct_subjects_cluster_ns"
+    memory.reset(namespace)
+
+    memory.add_memory("Alice and Bob have a work profile.", namespace=namespace)
+    memory.add_memory("Alice and Bob have a planning profile.", namespace=namespace)
+    edges = memory.store.list_edges(namespace)
+    clusters = memory.store.list_edge_clusters(namespace)
+    semantic_clusters = [cluster for cluster in clusters if cluster.cluster_labels == ["semantic_anchor"]]
+    semantic_members = memory.store.list_edge_cluster_members(
+        namespace,
+        [cluster.cluster_id for cluster in semantic_clusters],
+    )
+    memory.close()
+
+    assert len(edges) == 2
+    assert {cluster.metadata["anchor_value"] for cluster in semantic_clusters} == {"alice", "bob"}
+    assert all(cluster.metadata["cluster_reasons"] == ["subject_subject"] for cluster in semantic_clusters)
+    assert all(
+        {occurrence["position"] for occurrence in cluster.metadata["anchor_occurrences"]} == {"subject"}
+        for cluster in semantic_clusters
+    )
+    assert {member.edge_id for member in semantic_members} == {edge.edge_id for edge in edges}
+
+
 def test_edge_cluster_metadata_merge_handles_dict_occurrence_lists(tmp_path):
     memory = Memory.from_config(
         {"storage": {"path": str(tmp_path / "memory.sqlite3")}},

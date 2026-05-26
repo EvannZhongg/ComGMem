@@ -56,7 +56,7 @@
 
 - 还没有统一 MemoryNode merge/update/conflict 的 LLM 维护链；当前仅完成 Node summary 和 LocalTriple 维护。
 - HyperEdge 当前只做同 `edge_id` 的轻量复用和 description/source metadata 合并；向量召回候选、LLM edge merge、成员追加和版本化属于未来计划，不是当前主要目标。
-- EdgeCluster 当前只做确定性锚点聚合视图，没有维护配置、后台 cluster merge 或冲突健康检查；锚点包括共享成员节点和 subject/object 端点重合。
+- EdgeCluster 当前只做确定性锚点聚合视图，没有维护配置、后台 cluster merge 或冲突健康检查；锚点包括共享成员节点和符合 eligibility 的 subject/object 端点重合。
 - access maintenance 只更新命中 nodes，不更新 HyperEdge / EdgeCluster。
 - `time.relative_decay`、`access_boost`、temporal filter 尚未进入评分和维护流程。
 
@@ -271,10 +271,10 @@ metadata
 
 - EdgeCluster 当前是确定性锚点 HyperEdge 聚合视图。
 - 两条 HyperEdge 只要共享至少一个 `member_node_id`，就可以进入同一 EdgeCluster。
-- 除共享 member node 外，如果两条 HyperEdge 的成员 node 下 active LocalTriples 出现 normalized subject/object 端点重合，也可以进入 EdgeCluster。端点 reason 包括 `subject_subject`、`object_object`、`subject_object`、`object_subject`。
+- 除共享 member node 外，如果两条 HyperEdge 的成员 node 下 active LocalTriples 出现符合 eligibility 的 normalized subject/object 端点重合，也可以进入 EdgeCluster。端点 eligibility 为：`subject_object` / `object_subject` 命中至少 1 次，或同一 edge pair 上 `subject_subject` 命中至少 2 个文本不同的 normalized subject；单独 `object_object` 不再建立 cluster。
 - `BasicEdgeClusterBuilder` 统一使用 `AnchorKey/AnchorOccurrence` 构建 shared-node 与 semantic-anchor clusters；两类 cluster 共享同一套 fingerprint、metadata merge、description variant append 和 `EdgeClusterMember` 去重流程。
 - 示例：edge A 的某个成员 node 有 `S1-P1-O1`，edge B 的某个成员 node 有 `S2-P2-O2`；如果 `O1 == S2`，则保持两个 triples 仍为单跳表达，同时建立一个 `semantic_anchor` cluster，把两条 edge 组织到同一检索视图中。
-- 如果同一组 edge 同时共享 member node，且还存在 `S-S` 或 `S-O/O-S/O-O` 等多个端点锚点，应在 cluster metadata 中保留多个 `cluster_reasons` / `anchor_occurrences`，并对 `EdgeClusterMember(cluster_id, edge_id)` 做确定性去重。
+- 如果同一组 edge 同时共享 member node，且还存在 eligible `S-S` 或 `S-O/O-S` 等多个端点锚点，应在 cluster metadata 中保留多个 `cluster_reasons` / `anchor_occurrences`，并对 `EdgeClusterMember(cluster_id, edge_id)` 做确定性去重。
 - EdgeCluster 不触发 HyperEdge merge，也不判断支持、更新、冲突关系。
 - `description_variants` 只作为检索上下文资产保存，不作为 cluster 相似度合并依据。
 - `EdgeClusterMember.relation_to_cluster` 已移除；cluster 成立依据通过 `EdgeCluster.cluster_labels` 与 metadata 表达。shared-node cluster 使用 `cluster_labels=["shared_node"]` 与 `metadata.shared_node_ids`；semantic-anchor cluster 使用 `cluster_labels=["semantic_anchor"]` 与 `metadata.cluster_basis/anchor_value/anchor_positions/anchor_occurrences/cluster_reasons`。
