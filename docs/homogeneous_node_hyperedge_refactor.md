@@ -253,7 +253,7 @@ ExtractedEdgeSummary + member nodes -> HyperEdge(description, node_ids)
   - optional inferred metadata
 - `edge_coherence` 仍可保留：同一 HyperEdge 内多个 seed hit 加分。
 - `metadata.edge_roles` 删除。
-- result content 以 edge description + member node summaries/triples 组织。
+- result content 以 `memoryN：edge description（turn_distance）` 顺序组织，并直接拼接该 edge 下未重复 node 的 active triples。
 
 ### 3.9 配置
 

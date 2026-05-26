@@ -84,7 +84,10 @@ class Retriever:
         ranked_edges = self.graph_ripple.attach_cluster_periphery(namespace=namespace, ranked_edges=core_edges)
 
         limit = min(top_k, self.config.final_top_k, len(ranked_edges))
-        return [self._to_result(item, analysis_metadata=analysis.to_metadata()) for item in ranked_edges[:limit]]
+        return [
+            self._to_result(item, analysis_metadata=analysis.to_metadata(), current_turn=current_turn)
+            for item in ranked_edges[:limit]
+        ]
 
     def _rank_nodes(
         self,
@@ -216,7 +219,7 @@ class Retriever:
     def _edge_core_limit(self) -> int:
         return max(0, self.config.edge_core_top_k)
 
-    def _to_result(self, ranked_edge: RankedEdge, *, analysis_metadata: dict) -> SearchResult:
+    def _to_result(self, ranked_edge: RankedEdge, *, analysis_metadata: dict, current_turn: int | None) -> SearchResult:
         edge = ranked_edge.edge
         metadata = {
             "query_analysis": analysis_metadata,
@@ -228,17 +231,24 @@ class Retriever:
             "hit_node_ids": sorted(ranked_edge.hit_node_ids),
             "cluster_ids": sorted(ranked_edge.cluster_ids),
             "cluster_edge_descriptions": ranked_edge.cluster_edge_descriptions,
-            "periphery_edges": ranked_edge.periphery_edges,
-            "periphery_nodes": [self._node_metadata(item) for item in ranked_edge.periphery_nodes],
+            "periphery_edges": self._periphery_edges_metadata(ranked_edge, current_turn=current_turn),
+            "periphery_nodes": [
+                self._node_metadata(item, current_turn=current_turn) for item in ranked_edge.periphery_nodes
+            ],
             "score_parts": ranked_edge.score_parts,
             "edge_vector_hits": ranked_edge.edge_vector_hits,
             "time": edge.time.model_dump(mode="json"),
+            "relative_time": _relative_time_for_bundle(
+                edge.time,
+                current_turn=current_turn,
+                source_turn_ids=_strings(edge.metadata.get("source_turn_ids")),
+            ),
             "edge_metadata": edge.metadata,
-            "edge_nodes": [self._node_metadata(item) for item in ranked_edge.nodes],
+            "edge_nodes": [self._node_metadata(item, current_turn=current_turn) for item in ranked_edge.nodes],
         }
         return SearchResult(
             id=edge.edge_id,
-            content=self._edge_content(ranked_edge),
+            content=self._edge_content(ranked_edge, current_turn=current_turn),
             score=float(ranked_edge.score),
             metadata=metadata,
         )
@@ -248,8 +258,9 @@ class Retriever:
         channels.update(str(hit["channel"]) for hit in ranked_edge.edge_vector_hits if hit.get("channel"))
         return sorted(channels)
 
-    def _node_metadata(self, fused: FusedNode) -> dict[str, object]:
+    def _node_metadata(self, fused: FusedNode, *, current_turn: int | None) -> dict[str, object]:
         node = fused.node
+        source_turn_ids = _strings(node.metadata.get("source_turn_ids"))
         payload: dict[str, object] = {
             "node_id": node.node_id,
             "node_labels": node.node_labels,
@@ -259,21 +270,84 @@ class Retriever:
             "channels": sorted(fused.channels),
             "score_parts": fused.score_parts,
             "matched_vector_items": fused.vector_hits,
-            "source_turn_ids": node.metadata.get("source_turn_ids", []),
+            "source_turn_ids": source_turn_ids,
             "time": node.time.model_dump(mode="json"),
+            "relative_time": _relative_time_for_bundle(
+                node.time,
+                current_turn=current_turn,
+                source_turn_ids=source_turn_ids,
+            ),
             "node_metadata": node.metadata,
             "triples": [
-                triple.model_dump(mode="json")
+                _triple_metadata(triple, current_turn=current_turn)
                 for triple in node.local_graph.triples
                 if triple.status == "active"
             ],
         }
         return payload
 
-    def _edge_content(self, ranked_edge: RankedEdge) -> str:
+    def _periphery_edges_metadata(self, ranked_edge: RankedEdge, *, current_turn: int | None) -> list[dict[str, object]]:
+        nodes_by_id = {
+            item.node.node_id: item
+            for item in [*ranked_edge.nodes, *ranked_edge.periphery_nodes]
+        }
+        payloads: list[dict[str, object]] = []
+        for edge_payload in ranked_edge.periphery_edges:
+            payload = dict(edge_payload)
+            edge_metadata = payload.get("edge_metadata")
+            edge_metadata = edge_metadata if isinstance(edge_metadata, dict) else {}
+            source_turn_ids = _strings(edge_metadata.get("source_turn_ids") or payload.get("source_turn_ids"))
+            node_ids = _strings(payload.get("node_ids"))
+            payload["relative_time"] = _relative_time_for_payload(
+                payload.get("time"),
+                current_turn=current_turn,
+                source_turn_ids=source_turn_ids,
+            )
+            payload["nodes"] = [
+                self._node_metadata(nodes_by_id[node_id], current_turn=current_turn)
+                for node_id in node_ids
+                if node_id in nodes_by_id
+            ]
+            payloads.append(payload)
+        return payloads
+
+    def _edge_content(self, ranked_edge: RankedEdge, *, current_turn: int | None) -> str:
         edge = ranked_edge.edge
-        node_lines = "\n".join(f"- {item.node.content}" for item in ranked_edge.nodes)
-        return f"{edge.description}\nNodes:\n{node_lines}"
+        seen_node_ids: set[str] = set()
+        seen_edge_ids = {edge.edge_id}
+        blocks = [
+            _format_edge_memory_context(
+                index=1,
+                description=edge.description,
+                relative_time=_relative_time_for_bundle(
+                    edge.time,
+                    current_turn=current_turn,
+                    source_turn_ids=_strings(edge.metadata.get("source_turn_ids")),
+                ),
+                nodes=[self._node_metadata(item, current_turn=current_turn) for item in ranked_edge.nodes],
+                seen_node_ids=seen_node_ids,
+            )
+        ]
+        periphery_edges = self._periphery_edges_metadata(ranked_edge, current_turn=current_turn)
+        memory_index = 2
+        for edge_payload in periphery_edges:
+            edge_id = str(edge_payload.get("edge_id") or "")
+            if edge_id and edge_id in seen_edge_ids:
+                continue
+            if edge_id:
+                seen_edge_ids.add(edge_id)
+            nodes = edge_payload.get("nodes")
+            blocks.append(
+                _format_edge_memory_context(
+                    index=memory_index,
+                    description=str(edge_payload.get("description") or ""),
+                    relative_time=edge_payload.get("relative_time"),
+                    nodes=[node for node in nodes if isinstance(node, dict)] if isinstance(nodes, list) else [],
+                    seen_node_ids=seen_node_ids,
+                )
+            )
+            memory_index += 1
+        return "\n\n".join(block for block in blocks if block.strip())
 
 
 def _vector_node_payload(hit: VectorNodeHit) -> dict[str, object]:
@@ -294,3 +368,207 @@ def _vector_edge_payload(hit: VectorEdgeHit) -> dict[str, object]:
         "text": hit.hit.text,
         "payload": hit.hit.payload,
     }
+
+
+def _triple_metadata(triple, *, current_turn: int | None) -> dict[str, object]:
+    payload = triple.model_dump(mode="json")
+    payload["relative_time"] = _relative_time_for_source_turns(
+        current_turn=current_turn,
+        source_turn_ids=_strings(triple.qualifiers.get("source_turn_ids")),
+    )
+    return payload
+
+
+def _format_edge_memory_context(
+    *,
+    index: int,
+    description: str,
+    relative_time: object,
+    nodes: list[dict[str, object]],
+    seen_node_ids: set[str],
+) -> str:
+    lines = [
+        f"memory{index}\uff1a{description}\uff08{_relative_time_label(relative_time)}\uff09",
+    ]
+    for node in nodes:
+        node_id = str(node.get("node_id") or "")
+        if node_id and node_id in seen_node_ids:
+            continue
+        if node_id:
+            seen_node_ids.add(node_id)
+        triples = node.get("triples")
+        if not isinstance(triples, list):
+            continue
+        for triple in triples:
+            if not isinstance(triple, dict):
+                continue
+            lines.append(_format_triple_line(triple))
+    return "\n".join(lines)
+
+
+def _format_triple_line(triple: dict[str, object]) -> str:
+    subject = str(triple.get("subject") or "").strip()
+    predicate = str(triple.get("predicate") or "").strip()
+    obj = str(triple.get("object") or "").strip()
+    return f"{subject} -{predicate}- {obj}"
+
+
+def _relative_time_for_bundle(
+    bundle,
+    *,
+    current_turn: int | None,
+    source_turn_ids: list[str],
+) -> dict[str, object]:
+    activation = getattr(bundle, "activation", None)
+    created_turn = getattr(activation, "created_turn", None)
+    inserted_turn = getattr(activation, "inserted_turn", None)
+    updated_turn = getattr(activation, "updated_turn", None)
+    last_access_turn = getattr(activation, "last_access_turn", None)
+    return _relative_time_for_activation(
+        current_turn=current_turn,
+        created_turn=created_turn,
+        inserted_turn=inserted_turn,
+        updated_turn=updated_turn,
+        last_access_turn=last_access_turn,
+        source_turn_ids=source_turn_ids,
+    )
+
+
+def _relative_time_for_payload(
+    time_payload: object,
+    *,
+    current_turn: int | None,
+    source_turn_ids: list[str],
+) -> dict[str, object]:
+    activation = {}
+    if isinstance(time_payload, dict):
+        raw_activation = time_payload.get("activation")
+        if isinstance(raw_activation, dict):
+            activation = raw_activation
+    return _relative_time_for_activation(
+        current_turn=current_turn,
+        created_turn=_int_or_none(activation.get("created_turn")),
+        inserted_turn=_int_or_none(activation.get("inserted_turn")),
+        updated_turn=_int_or_none(activation.get("updated_turn")),
+        last_access_turn=_int_or_none(activation.get("last_access_turn")),
+        source_turn_ids=source_turn_ids,
+    )
+
+
+def _relative_time_for_source_turns(*, current_turn: int | None, source_turn_ids: list[str]) -> dict[str, object]:
+    source_distances = _source_turn_distances(source_turn_ids, current_turn)
+    return {
+        "current_turn": current_turn,
+        "turn_distance": _minimum_distance(source_distances),
+        "source_turn_ids": source_turn_ids,
+        "source_turn_distances": source_distances,
+    }
+
+
+def _relative_time_for_activation(
+    *,
+    current_turn: int | None,
+    created_turn: int | None,
+    inserted_turn: int | None,
+    updated_turn: int | None,
+    last_access_turn: int | None,
+    source_turn_ids: list[str],
+) -> dict[str, object]:
+    source_distances = _source_turn_distances(source_turn_ids, current_turn)
+    inserted_turn_distance = _turn_distance(inserted_turn, current_turn)
+    created_turn_distance = _turn_distance(created_turn, current_turn)
+    updated_turn_distance = _turn_distance(updated_turn, current_turn)
+    last_access_turn_distance = _turn_distance(last_access_turn, current_turn)
+    source_turn_distance = _minimum_distance(source_distances)
+    return {
+        "current_turn": current_turn,
+        "turn_distance": _first_not_none(
+            source_turn_distance,
+            inserted_turn_distance,
+            created_turn_distance,
+            updated_turn_distance,
+            last_access_turn_distance,
+        ),
+        "created_turn": created_turn,
+        "created_turn_distance": created_turn_distance,
+        "inserted_turn": inserted_turn,
+        "inserted_turn_distance": inserted_turn_distance,
+        "updated_turn": updated_turn,
+        "updated_turn_distance": updated_turn_distance,
+        "last_access_turn": last_access_turn,
+        "last_access_turn_distance": last_access_turn_distance,
+        "source_turn_ids": source_turn_ids,
+        "source_turn_distance": source_turn_distance,
+        "source_turn_distances": source_distances,
+    }
+
+
+def _relative_time_label(relative_time: object) -> str:
+    if not isinstance(relative_time, dict):
+        return "turn_distance=unknown"
+    turn_distance = relative_time.get("turn_distance")
+    current_turn = relative_time.get("current_turn")
+    if turn_distance is None:
+        return f"turn_distance=unknown, current_turn={current_turn}"
+    return f"turn_distance={turn_distance}, current_turn={current_turn}"
+
+
+def _source_turn_distances(source_turn_ids: list[str], current_turn: int | None) -> list[dict[str, object]]:
+    distances: list[dict[str, object]] = []
+    for turn_id in source_turn_ids:
+        turn_index = _turn_index(turn_id)
+        distances.append(
+            {
+                "turn_id": turn_id,
+                "turn_index": turn_index,
+                "distance": _turn_distance(turn_index, current_turn),
+            }
+        )
+    return distances
+
+
+def _turn_distance(turn_index: int | None, current_turn: int | None) -> int | None:
+    if turn_index is None or current_turn is None:
+        return None
+    return max(0, current_turn - turn_index)
+
+
+def _turn_index(turn_id: object) -> int | None:
+    if isinstance(turn_id, int):
+        return turn_id
+    text = str(turn_id).strip()
+    if not text:
+        return None
+    if text.startswith("turn:"):
+        text = text.split(":", 1)[1]
+    return _int_or_none(text)
+
+
+def _int_or_none(value: object) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _minimum_distance(distances: list[dict[str, object]]) -> int | None:
+    values = [item.get("distance") for item in distances]
+    int_values = [value for value in values if isinstance(value, int)]
+    return min(int_values) if int_values else None
+
+
+def _first_not_none(*values: object) -> object:
+    for value in values:
+        if value is not None:
+            return value
+    return None
+
+
+def _strings(value: object) -> list[str]:
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if value in (None, "", [], {}):
+        return []
+    return [str(value).strip()]

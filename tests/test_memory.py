@@ -84,7 +84,7 @@ def test_add_uses_explicit_extractor_only(tmp_path):
     assert stats["turns"] == 1
     assert stats["turn_messages"] == 1
     assert results
-    assert "Alice prefers morning interviews" in results[0]["content"]
+    assert "Alice -prefers- morning interviews" in results[0]["content"]
     assert "lexical" in results[0]["metadata"]["channels"]
     assert any("Alice prefers morning interviews" in node["content"] for node in results[0]["metadata"]["edge_nodes"])
     assert all(node.metadata.get("source_turn_ids") == ["turn:0"] for node in nodes)

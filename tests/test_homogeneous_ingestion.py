@@ -98,7 +98,7 @@ def test_ingestion_builds_nodes_and_description_only_hyperedges(tmp_path):
     assert stats["entity_aliases"] >= 1
     assert any(cluster.cluster_labels == ["shared_node"] for cluster in clusters)
     assert results
-    assert "Alice prefers morning interviews" in results[0]["content"]
+    assert "Alice -prefers- morning interviews" in results[0]["content"]
     assert "edge_type" not in results[0]["metadata"]
     assert "edge_relation" not in results[0]["metadata"]
     assert "edge_roles" not in results[0]["metadata"]
@@ -106,6 +106,47 @@ def test_ingestion_builds_nodes_and_description_only_hyperedges(tmp_path):
     assert "cluster_edge_descriptions" in results[0]["metadata"]
     assert all(node.time.world.event_time for node in nodes)
     assert all(node.time.world.source_timestamp for node in nodes)
+
+
+def test_search_context_includes_triples_sibling_edges_and_relative_turns(tmp_path):
+    memory = Memory.from_config(
+        {
+            "storage": {"path": str(tmp_path / "memory.sqlite3")},
+            "retrieval": {"edge_core_top_k": 1, "final_top_k": 1},
+        },
+        extractor=StaticHomogeneousExtractor(),
+    )
+    namespace = "search_context_shape_ns"
+    memory.reset(namespace)
+
+    memory.add_memory("Alice prefers morning interviews.", namespace=namespace)
+    results = memory.search("morning interviews", namespace=namespace, top_k=1)
+    memory.close()
+
+    assert len(results) == 1
+    result = results[0]
+    assert result["content"].startswith("memory1\uff1a")
+    assert "memory2\uff1a" in result["content"]
+    assert "Core edge:" not in result["content"]
+    assert "Sibling edges:" not in result["content"]
+    assert "Triples:" not in result["content"]
+    assert "Alice -prefers- morning interviews" in result["content"]
+    assert result["content"].count("Alice -prefers- morning interviews") == 1
+    assert "turn_distance=1" in result["content"]
+
+    metadata = result["metadata"]
+    assert metadata["relative_time"]["turn_distance"] == 1
+    assert metadata["edge_nodes"]
+    assert all(node["relative_time"]["turn_distance"] == 1 for node in metadata["edge_nodes"])
+    assert any(
+        triple["relative_time"]["turn_distance"] == 1
+        for node in metadata["edge_nodes"]
+        for triple in node["triples"]
+    )
+    assert metadata["periphery_edges"]
+    assert metadata["periphery_edges"][0]["relative_time"]["turn_distance"] == 1
+    assert metadata["periphery_edges"][0]["nodes"]
+    assert any(node["triples"] for node in metadata["periphery_edges"][0]["nodes"])
 
 
 def test_edge_cluster_groups_edges_with_shared_member_node(tmp_path):

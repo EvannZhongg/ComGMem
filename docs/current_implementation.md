@@ -247,14 +247,14 @@ S_final_edge(E) =
 SearchResult 当前结构要点：
 
 - `id`：`edge_id`。
-- `content`：core edge description 加 core edge 内 node 内容。
 - `score`：edge-level RRF 后的最终 edge score。
 - `metadata.edge_metadata`：系统写入的 edge metadata，例如 `source_turn_ids`。
-- `metadata.edge_nodes`：core edge 内的 active member nodes，每个 node 带 `node_id/content/summary/score/channels/score_parts/matched_vector_items/source_turn_ids/triples/time/node_metadata`。
+- `content`：按 core edge、sibling edges 的顺序输出 `memoryN：edge description（turn_distance）`，随后直接拼接该 edge 下未重复 node 的 active triples，格式为 `subject -predicate- object`；sibling edge 如果包含已在前面输出过的 node，则该 node 的 triples 不重复拼接。
+- `metadata.edge_nodes`：core edge 内的 active member nodes，每个 node 带 `node_id/content/summary/score/channels/score_parts/matched_vector_items/source_turn_ids/triples/time/relative_time/node_metadata`；每条 active triple 也带 `relative_time`。
 - `metadata.edge_vector_hits`：Track 2 的 HyperEdge description 向量命中，不再混入 node 的 `matched_vector_items`。
 - `metadata.score_parts`：包含 `rrf_track1`、`rrf_track2`、`track1_rank`、`track2_rank`、`track1_edge_score`、`track2_vector_score`、`edge_rrf_score` 和 tie-breaker 分数等可解释字段。
 - `metadata.cluster_edge_descriptions`：如果 core edge 属于 EdgeCluster，会从该 cluster 的成员 HyperEdges 动态读取 edge descriptions。
-- `metadata.periphery_edges` / `metadata.periphery_nodes`：只由 Top K2 core edges 所属 cluster 带出的 sibling context，并受 `cluster_periphery_edge_limit` / `cluster_periphery_node_limit` 限制；periphery 不参与 core edge 排名，也不会继续触发新的 cluster 扩散。
+- `metadata.periphery_edges` / `metadata.periphery_nodes`：只由 Top K2 core edges 所属 cluster 带出的 sibling context，并受 `cluster_periphery_edge_limit` / `cluster_periphery_node_limit` 限制；每条 sibling edge payload 包含 `description/node_ids/time/relative_time/edge_metadata/nodes`，其中 `nodes` 同样携带 active triples 与相对 turn 距离。periphery 不参与 core edge 排名，也不会继续触发新的 cluster 扩散。
 
 当前仍不接入：
 

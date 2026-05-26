@@ -319,6 +319,7 @@ def _periphery_edges_by_core_edge(
                         "edge_id": edge.edge_id,
                         "description": edge.description,
                         "node_ids": edge.node_ids,
+                        "time": edge.time.model_dump(mode="json"),
                         "edge_metadata": edge.metadata,
                     }
                 )

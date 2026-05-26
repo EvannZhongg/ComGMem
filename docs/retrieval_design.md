@@ -56,6 +56,8 @@ Memory.search(query, namespace)
   -> final top-k HyperEdges, each carrying member nodes
 ```
 
+最终返回上下文应以 HyperEdge 为组织单位：每条 core edge 至少包含 edge description、edge 下的 active nodes、每个 node 的 active triples，以及相对当前回答 turn 的时间距离。由 controlled cluster ripple 带出的 sibling edges 也应按 sibling edge 分组携带 description、nodes、node triples 与相对 turn 距离；这些 sibling context 只补充背景，不参与 core edge 排名。
+
 ## 向量召回
 
 用户 query 会先被向量化，然后分别查询两个 node 向量索引和一个 HyperEdge 向量索引：
