@@ -203,6 +203,7 @@ metadata
   - `needs_review`: 保存 incoming 且标记为 `uncertain`。
 - triple qualifiers 中由系统维护 `source_turn_ids` 与 `source_triple_ids`；LLM 路由触发后，系统还会写入 `maintenance_discarded_triple_ids`、`maintenance_replaced_triple_ids`、`maintenance_related_triple_ids` 或 `maintenance_merged_triple_ids` 等追踪字段。
 - 退役或 uncertain 状态由系统写入 `LocalTriple.status` 和 maintenance qualifiers；LLM 不输出 `triple_id` 或系统来源字段。
+- node metadata 中由系统维护 `maintenance.local_triples.triple_distribution`，记录当前 triples 的总数、status 分布、active predicate 分布和 active subject/predicate 分布；初次写入和每次 node 维护更新后刷新。
 - 如果出现同 S/P 候选但没有维护 LLM，写入显式失败。
 - SQLite `triples` 表持久化 node 内 triples。
 - 无论路由结果是 `keep_existing/keep_new/keep_both/merge/needs_review` 哪一种，该 node 都会在本次写入后重写 `node_local_graph` 向量；非 active triples 保留在 canonical store 中，但不会进入 SQLite FTS local_graph 文本、node-local-graph 向量文本或检索返回的 active triples。

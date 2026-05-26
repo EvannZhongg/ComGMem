@@ -389,6 +389,12 @@ def test_local_triple_maintenance_keep_new_retires_existing_triple_and_reindexes
     assert triples[1].qualifiers["source_turn_ids"] == ["turn:1"]
     assert triples[1].qualifiers["maintenance_replaced_triple_ids"] == [triples[0].triple_id]
     assert triples[1].qualifiers["maintenance_replaced_source_turn_ids"] == ["turn:0"]
+    distribution = node.metadata["maintenance"]["local_triples"]["triple_distribution"]
+    assert distribution["total"] == 2
+    assert distribution["active"] == 1
+    assert distribution["retired"] == 1
+    assert distribution["active_by_predicate"] == {"lives_in": 1}
+    assert distribution["active_by_subject_predicate"] == {"alice|lives_in": 1}
     graph_records = [
         record
         for record in vector_store.records
@@ -488,6 +494,11 @@ def test_local_triple_maintenance_duplicate_spo_merges_turn_provenance_without_l
     assert triple.qualifiers["source_turn_ids"] == ["turn:0", "turn:1"]
     assert len(triple.qualifiers["source_triple_ids"]) == 2
     assert triple.qualifiers["maintenance_last_action"] == "duplicate_spo"
+    distribution = node.metadata["maintenance"]["local_triples"]["triple_distribution"]
+    assert distribution["total"] == 1
+    assert distribution["active"] == 1
+    assert distribution["by_status"] == {"active": 1}
+    assert distribution["active_by_predicate"] == {"likes": 1}
 
 
 def test_local_triple_maintenance_keep_both_preserves_compatible_values(tmp_path):
@@ -655,6 +666,12 @@ def test_local_triple_maintenance_batches_multiple_conflicts_for_same_node(tmp_p
         ("likes", "coffee", "active"),
     ]
     assert node.metadata["maintenance"]["local_triples"]["decision_count"] == 2
+    distribution = node.metadata["maintenance"]["local_triples"]["triple_distribution"]
+    assert distribution["total"] == 4
+    assert distribution["active"] == 3
+    assert distribution["retired"] == 1
+    assert distribution["active_by_predicate"] == {"likes": 2, "lives_in": 1}
+    assert distribution["active_by_subject_predicate"] == {"alice|likes": 2, "alice|lives_in": 1}
 
 
 def test_local_triple_maintenance_requires_llm_for_same_subject_predicate(tmp_path):

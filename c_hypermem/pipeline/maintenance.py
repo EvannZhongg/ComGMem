@@ -57,6 +57,7 @@ class GraphMaintenance:
             incoming_source_ids=incoming_source_ids,
             context=context,
         )
+        _refresh_local_triple_distribution(existing, context)
         return touch_node_update(existing, context.current_turn)
 
     def merge_edge(self, existing: HyperEdge | None, incoming: HyperEdge, context: AssemblyContext) -> HyperEdge:
@@ -271,6 +272,7 @@ class GraphMaintenance:
 
     def _initialize_new_node(self, node: MemoryNode, context: AssemblyContext) -> MemoryNode:
         _initialize_triple_provenance(node, context)
+        _refresh_local_triple_distribution(node, context)
         if not self.config.maintenance.node_summary.enabled:
             return node
         state = _summary_state(node)
@@ -853,6 +855,48 @@ def _record_triple_maintenance(
     local_triples["last_rationale"] = decision.rationale
     local_triples["last_updated_turn"] = context.current_turn
     local_triples["decision_count"] = int(local_triples.get("decision_count") or 0) + 1
+    maintenance["local_triples"] = local_triples
+    node.metadata["maintenance"] = maintenance
+
+
+def _refresh_local_triple_distribution(node: MemoryNode, context: AssemblyContext) -> None:
+    triples = list(node.local_graph.triples)
+    status_counts: dict[str, int] = {}
+    active_predicate_counts: dict[str, int] = {}
+    active_subject_predicate_counts: dict[str, int] = {}
+    scoped_count = 0
+
+    for triple in triples:
+        status_counts[triple.status] = status_counts.get(triple.status, 0) + 1
+        if triple.scope_edge_id or triple.scope_cluster_id:
+            scoped_count += 1
+        if triple.status != "active":
+            continue
+        predicate_key = _triple_predicate_key(triple)
+        subject_predicate_key = f"{_triple_subject_key(triple)}|{predicate_key}"
+        active_predicate_counts[predicate_key] = active_predicate_counts.get(predicate_key, 0) + 1
+        active_subject_predicate_counts[subject_predicate_key] = active_subject_predicate_counts.get(subject_predicate_key, 0) + 1
+
+    distribution = {
+        "total": len(triples),
+        "active": status_counts.get("active", 0),
+        "retired": status_counts.get("retired", 0),
+        "invalidated": status_counts.get("invalidated", 0),
+        "uncertain": status_counts.get("uncertain", 0),
+        "by_status": dict(sorted(status_counts.items())),
+        "active_by_predicate": dict(sorted(active_predicate_counts.items())),
+        "active_by_subject_predicate": dict(sorted(active_subject_predicate_counts.items())),
+        "scoped": scoped_count,
+        "unscoped": len(triples) - scoped_count,
+        "last_updated_turn": context.current_turn,
+        "last_updated_at": utc_now_iso(),
+    }
+
+    maintenance = node.metadata.get("maintenance")
+    maintenance = dict(maintenance) if isinstance(maintenance, dict) else {}
+    local_triples = maintenance.get("local_triples")
+    local_triples = dict(local_triples) if isinstance(local_triples, dict) else {}
+    local_triples["triple_distribution"] = distribution
     maintenance["local_triples"] = local_triples
     node.metadata["maintenance"] = maintenance
 

@@ -99,6 +99,7 @@ Memory.add_memory/add
 - LLM 只做批量路由判断：一次返回与冲突数组等长、顺序一致的 `LocalTripleMergeDecision` JSON 数组；单个决策仍只允许 `keep_existing`、`keep_new`、`keep_both`、`merge`、`needs_review`。
 - 系统根据 LLM 返回的 caller refs 执行动作：丢弃 incoming、追加 incoming、退役 affected existing、保存 merged triple 或把 incoming 标为 `uncertain`。
 - 系统在 triple qualifiers 中维护 provenance：`source_turn_ids` 记录来源 turn，`source_triple_ids` 记录每次抽取来源实例；`maintenance_*_triple_ids` 记录被丢弃、替换、关联或合并的规范 `triple_id`。LLM 不生成这些 ID。
+- 系统在 `node.metadata.maintenance.local_triples.triple_distribution` 中维护当前 node triples 的派生统计，包括总数、status 分布、active predicate 分布和 active subject/predicate 分布；该字段在 node 初次写入和每次维护更新后刷新。
 - 如果有同 S/P 候选但没有维护 LLM，写入会显式失败，不做规则兜底。
 - 无论 LLM 返回 `keep_existing/keep_new/keep_both/merge/needs_review` 哪个动作，该 node 都会随本次写入重写 `node_local_graph` 向量；向量文本只包含 active triples，因此被退役或标为 uncertain 的 triple 不参与拼接构建索引。
 
