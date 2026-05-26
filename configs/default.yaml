@@ -6,10 +6,6 @@ storage:
   backend: sqlite
   path: runs/c_hypermem/memory.sqlite3
 
-nlp:
-  # Optional spaCy model package name or local path. Relative paths are resolved from the current project working directory.
-  model_path: models/en_core_web_sm
-
 ingestion:
   context_window_messages: 3
 

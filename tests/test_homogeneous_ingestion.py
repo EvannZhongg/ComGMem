@@ -47,10 +47,13 @@ def test_default_config_uses_global_token_counting_config():
     assert "default_top_k" not in default_raw
     assert config.token_counting.tokenizer_encoding == "cl100k_base"
     assert models_raw["token_counting"]["tokenizer_encoding"] == "cl100k_base"
+    assert config.nlp.model_path == "models/en_core_web_sm"
+    assert models_raw["nlp"]["model_path"] == "models/en_core_web_sm"
     assert config.retrieval.rrf_k == 60
     assert config.retrieval.hyper_edge_description_vector_top_k == 10
     assert "tokenizer_encoding" not in default_raw["maintenance"]["node_summary"]
     assert "tokenizer_encoding" not in default_raw["maintenance"]["hyper_edge_description"]
+    assert "nlp" not in default_raw
     assert "edge_cluster" not in default_raw["maintenance"]
     assert not hasattr(config.maintenance, "edge_cluster")
 

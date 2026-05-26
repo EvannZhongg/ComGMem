@@ -17,7 +17,7 @@ pip install -e ".[nlp]"
 python -m pip install https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl --target models/en_core_web_sm --no-deps
 ```
 
-默认配置中的 `nlp.model_path` 是 `models/en_core_web_sm`，因此上面的命令会把模型安装到项目相对路径中。如果你希望使用当前 Python 环境里的 spaCy 模型包，也可以把 `nlp.model_path` 改成 `en_core_web_sm`，然后运行 `python -m spacy download en_core_web_sm`。
+`configs/models.yaml` 中的 `nlp.model_path` 默认是 `models/en_core_web_sm`。代码会按当前工作目录解析相对路径；默认从 `C-HyperMem` 根目录启动时，上面的命令会把模型安装到项目内的 `models/en_core_web_sm`，并能被 `retrieval.query_analysis: nlp` 加载。如果你希望使用当前 Python 环境里的 spaCy 模型包，也可以把 `nlp.model_path` 改成 `en_core_web_sm`，然后运行 `python -m spacy download en_core_web_sm`。
 
 在 `C-HyperMem\.env` 中配置模型环境变量，例如：
 
