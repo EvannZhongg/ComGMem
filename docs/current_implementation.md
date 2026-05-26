@@ -26,7 +26,7 @@
 - `turn` 不是 `MemoryNode` 标签；它是独立的原始对话记录配置，写入 `turns` 表和 `turn_dialogue` 向量索引，不需要 `LocalNodeGraph`。
 - `node_labels.unconfigured_label_policy` 是未配置标签的处理规则；传入 prompt 时只以规则文本出现，不作为可抽取 label 名称暴露给 LLM。
 - `configs/default.yaml` 中的 `include` 是配置加载器指令，会在进入 `MemoryConfig` 前合并 `models.yaml` 和 `node_labels.yaml`，因此保留；它不是运行时配置项。
-- `prompt_version`、`node_identity.*`、顶层 `local_graph.*`、`time.relative_decay.*`、`ingestion.event_mode/max_facts_per_event/extractor`、`extraction.output_schema/forbid_model_ids/forbid_confidence/allow_unknown_node_labels`、`hyperedges.enabled/build_from_extraction/merge_policy/resolution`、以及 node label 内的 `local_graph` 策略已从当前配置中移除。这些字段此前只被 Pydantic 接收或停留在设计文档中，当前写入、抽取、索引和检索路径不会读取它们。
+- `prompt_version`、`node_identity.*`、顶层 `local_graph.*`、`time.relative_decay.*`、`ingestion.event_mode/max_facts_per_event/extractor`、`extraction.output_schema/forbid_model_ids/forbid_confidence/allow_unknown_node_labels`、`hyperedges.*`、以及 node label 内的 `local_graph` 策略已从当前配置中移除。这些字段此前只被 Pydantic 接收、停留在设计文档中，或只是把系统默认实现从配置绕一圈传回代码，当前不再暴露给用户。
 
 ## 3. 当前 Schema
 
@@ -161,7 +161,7 @@ maintenance:
 
   payload 中仍保留 `node_id/triple_ids/triple_count/triples/attributes/node_metadata`。当一个 node 后续新增或更新 triples 时，会用同一个 `node_id` 生成的向量点 ID 覆盖更新该 node 的 local graph 向量；该向量可以被该 node 内每个 triple 通过 payload 中的 `triple_ids` 回指。
 - `node_content` 向量：索引 `MemoryNode.content` 与 `MemoryNode.summary` 的拼接文本，payload 中保留 `node_id/node_labels/status/time/metadata` 等信息。当前不再创建独立 `node_summary` 向量 collection。
-- `hyper_edge_description` 向量：索引每条具体 `HyperEdge.description`，payload 中保留 `edge_id/edge_fingerprint/node_ids/member_policy/member_signature/time/metadata` 等信息。
+- `hyper_edge_description` 向量：索引每条具体 `HyperEdge.description`，payload 中保留 `edge_id/edge_fingerprint/node_ids/member_signature/time/metadata` 等信息。
 - `edge_cluster_canonical` 向量：索引 `EdgeCluster.canonical_description`，payload 中保留 `cluster_id/cluster_labels/conflict_state` 等信息。
 - `edge_cluster_variant` 向量：索引 `EdgeCluster.description_variants` 中的各个描述变体，payload 中保留 `cluster_id/variant_index/source_edge_id` 等信息。`BasicEdgeClusterBuilder` 复用已有 cluster 时会追加新的 description variant，并重新持久化 cluster。
 - `turn_dialogue` 向量：只索引同一个 `turn_id` 下 role 为 `user` 和 `assistant` 的消息，按轮次拼接为完整对话日志，且 payload 中必须带 `turn_id`、`turn_index` 和 `dialogue_roles`。后续检索命中该向量时，应拿 `turn_id` 回 SQLite `turns` 表提取完整对话，而不是依赖向量库中的文本作为权威上下文。

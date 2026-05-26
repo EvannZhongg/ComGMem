@@ -52,7 +52,6 @@ class BasicHyperEdgeBuilder:
             namespace=context.namespace,
             edge_fingerprint=edge_fingerprint,
             description=edge_summary.description,
-            member_policy=self.config.hyperedges.member_policy_default,  # type: ignore[arg-type]
             member_signature=make_member_signature(node_ids),
             node_ids=node_ids,
             weights={node_id: 1.0 for node_id in node_ids},

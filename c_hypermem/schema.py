@@ -8,8 +8,6 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 NodeLabel = str
 MemoryStatus = Literal["active", "retired", "invalidated", "uncertain"]
 ConflictState = Literal["none", "contains_conflict", "needs_review"]
-MemberPolicy = Literal["immutable", "appendable", "versioned"]
-
 
 _EXTRA_FORBID = ConfigDict(extra="forbid")
 
@@ -174,7 +172,6 @@ class HyperEdge(BaseModel):
     edge_fingerprint: str
     description: str = ""
     status: MemoryStatus = "active"
-    member_policy: MemberPolicy = "immutable"
     member_signature: str = ""
     member_version: int = 1
     node_ids: list[str]

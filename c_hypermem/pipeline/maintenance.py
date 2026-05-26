@@ -68,7 +68,6 @@ class GraphMaintenance:
         incoming_description = incoming.description.strip()
 
         existing.status = incoming.status if existing.status != "active" else existing.status
-        existing.member_policy = incoming.member_policy
         existing.member_signature = incoming.member_signature
         existing.member_version = max(existing.member_version, incoming.member_version)
         existing.node_ids = list(dict.fromkeys([*existing.node_ids, *incoming.node_ids]))

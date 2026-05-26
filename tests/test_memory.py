@@ -113,7 +113,8 @@ def test_sqlite_hyper_edges_use_member_table(tmp_path):
     assert "weights_json" not in edge_columns
     assert "edge_key" not in edge_columns
     assert {"edge_fingerprint", "description", "polarity", "status"} <= edge_columns
-    assert {"member_policy", "member_signature", "member_version"} <= edge_columns
+    assert {"member_signature", "member_version"} <= edge_columns
+    assert "member_policy" not in edge_columns
     assert {"edge_id", "node_id", "role", "weight"} <= member_columns
     assert {"cluster_id", "cluster_fingerprint", "canonical_description", "conflict_state"} <= cluster_columns
     assert {"scope_edge_id", "scope_cluster_id", "role_in_edge", "edge_relation"} <= triple_columns
@@ -159,7 +160,7 @@ def test_default_config_includes_split_config_files():
         config.node_labels.labels
     )
     assert not hasattr(config, "node_identity")
-    assert config.hyperedges.member_policy_default == "appendable"
+    assert not hasattr(config, "hyperedges")
     assert config.edge_clusters.enabled
     assert config.edge_clusters.description_variants_limit == 8
     assert config.index.vector == "qdrant"

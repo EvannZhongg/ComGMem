@@ -475,7 +475,6 @@ def _hyper_edge_payload(edge: HyperEdge, item_type: str) -> dict[str, Any]:
         "edge_status": edge.status,
         "description": edge.description,
         "node_ids": edge.node_ids,
-        "member_policy": edge.member_policy,
         "member_signature": edge.member_signature,
         "member_version": edge.member_version,
         "edge_time": edge.time.model_dump(mode="json"),

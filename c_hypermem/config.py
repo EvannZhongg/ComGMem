@@ -88,10 +88,6 @@ class NodeLabelsConfig(BaseModel):
         return dict(self.__pydantic_extra__ or {})
 
 
-class HyperEdgesConfig(BaseModel):
-    member_policy_default: str = "appendable"
-
-
 class NodeSummaryMaintenanceConfig(BaseModel):
     enabled: bool = True
     compact_after_k_sources: int = Field(default=10, ge=1)
@@ -154,7 +150,6 @@ class MemoryConfig(BaseModel):
     extraction: ExtractionConfig = Field(default_factory=ExtractionConfig)
     node_labels: NodeLabelsConfig = Field(default_factory=NodeLabelsConfig)
     turn: TurnConfig = Field(default_factory=TurnConfig)
-    hyperedges: HyperEdgesConfig = Field(default_factory=HyperEdgesConfig)
     edge_clusters: EdgeClustersConfig = Field(default_factory=EdgeClustersConfig)
     maintenance: MaintenanceConfig = Field(default_factory=MaintenanceConfig)
     index: IndexConfig = Field(default_factory=IndexConfig)

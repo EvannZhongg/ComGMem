@@ -17,9 +17,6 @@ extraction:
   prompt: extraction/memory_extraction.md
   pass_node_labels_to_prompt: true
 
-hyperedges:
-  member_policy_default: appendable
-
 edge_clusters:
   enabled: true
   description_variants_limit: 8

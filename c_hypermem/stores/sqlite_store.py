@@ -181,15 +181,14 @@ class SQLiteStore:
                     """
                     INSERT INTO hyper_edges (
                         namespace, edge_id, edge_fingerprint, description,
-                        status, member_policy, member_signature, member_version,
+                        status, member_signature, member_version,
                         absolute_time_json, relative_time_json, metadata_json
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(namespace, edge_id) DO UPDATE SET
                         edge_fingerprint = excluded.edge_fingerprint,
                         description = excluded.description,
                         status = excluded.status,
-                        member_policy = excluded.member_policy,
                         member_signature = excluded.member_signature,
                         member_version = excluded.member_version,
                         absolute_time_json = excluded.absolute_time_json,
@@ -202,7 +201,6 @@ class SQLiteStore:
                         edge.edge_fingerprint,
                         edge.description,
                         edge.status,
-                        edge.member_policy,
                         edge.member_signature,
                         edge.member_version,
                         _to_json(edge.time.world),
@@ -696,7 +694,6 @@ class SQLiteStore:
                         edge_fingerprint TEXT NOT NULL,
                         description TEXT NOT NULL DEFAULT '',
                         status TEXT NOT NULL DEFAULT 'active',
-                        member_policy TEXT NOT NULL DEFAULT 'immutable',
                         member_signature TEXT NOT NULL DEFAULT '',
                         member_version INTEGER NOT NULL DEFAULT 1,
                         absolute_time_json TEXT NOT NULL,
@@ -852,7 +849,6 @@ def _edge_from_row(row: sqlite3.Row, members: list[sqlite3.Row]) -> HyperEdge:
         edge_fingerprint=row["edge_fingerprint"],
         description=row["description"],
         status=row["status"],
-        member_policy=row["member_policy"],
         member_signature=row["member_signature"],
         member_version=int(row["member_version"]),
         node_ids=node_ids,
