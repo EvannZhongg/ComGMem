@@ -190,6 +190,82 @@ def test_edge_cluster_groups_edges_with_semantic_anchor_from_local_triples(tmp_p
     assert {member.edge_id for member in semantic_members} == {edge.edge_id for edge in edges}
 
 
+def test_edge_cluster_metadata_merge_handles_dict_occurrence_lists(tmp_path):
+    memory = Memory.from_config(
+        {"storage": {"path": str(tmp_path / "memory.sqlite3")}},
+        extractor=SequenceHomogeneousExtractor(
+            [
+                {
+                    "edge_summaries": [
+                        {"ref": "e1", "description": "Alice uses Todoist."},
+                        {"ref": "e2", "description": "Alice uses Trello."},
+                    ],
+                    "nodes": [
+                        {
+                            "ref": "n1",
+                            "labels": ["entity"],
+                            "canonical_text": "Alice",
+                            "summaries": ["Alice is the user."],
+                            "triples": [{"subject": "Alice", "predicate": "uses", "object": "Todoist"}],
+                            "edge_summary_refs": ["e1", "e2"],
+                            "metadata": {"aliases": ["Alice"]},
+                        },
+                        {
+                            "ref": "n2",
+                            "labels": ["tool"],
+                            "canonical_text": "Todoist",
+                            "summaries": ["Todoist is a task app."],
+                            "edge_summary_refs": ["e1"],
+                        },
+                        {
+                            "ref": "n3",
+                            "labels": ["tool"],
+                            "canonical_text": "Trello",
+                            "summaries": ["Trello is a task app."],
+                            "edge_summary_refs": ["e2"],
+                        },
+                    ],
+                },
+                {
+                    "edge_summaries": [
+                        {"ref": "e3", "description": "Alice is adapting to a 9-to-5 schedule."},
+                        {"ref": "e4", "description": "Alice wants to stay on top of work tasks."},
+                    ],
+                    "nodes": [
+                        {
+                            "ref": "n1",
+                            "labels": ["entity"],
+                            "canonical_text": "Alice",
+                            "summaries": ["Alice is starting a new job."],
+                            "triples": [{"subject": "Alice", "predicate": "has_schedule", "object": "9-to-5"}],
+                            "edge_summary_refs": ["e3", "e4"],
+                            "metadata": {"aliases": ["Alice"]},
+                        },
+                        {
+                            "ref": "n2",
+                            "labels": ["task"],
+                            "canonical_text": "Alice wants to stay on top of work tasks.",
+                            "summaries": ["Alice wants task organization advice."],
+                            "edge_summary_refs": ["e4"],
+                        },
+                    ],
+                },
+            ]
+        ),
+    )
+    namespace = "cluster_metadata_merge_dict_lists_ns"
+    memory.reset(namespace)
+
+    memory.add_memory("I will try Todoist and Trello.", namespace=namespace)
+    memory.add_memory("I am adapting to my new 9-to-5 job.", namespace=namespace)
+    clusters = memory.store.list_edge_clusters(namespace)
+    memory.close()
+
+    shared_clusters = [cluster for cluster in clusters if cluster.cluster_labels == ["shared_node"]]
+    assert shared_clusters
+    assert any(len(cluster.metadata["anchor_occurrences"]) >= 4 for cluster in shared_clusters)
+
+
 def test_entity_label_nodes_reuse_existing_alias_entry(tmp_path):
     memory = Memory.from_config(
         {"storage": {"path": str(tmp_path / "memory.sqlite3")}},

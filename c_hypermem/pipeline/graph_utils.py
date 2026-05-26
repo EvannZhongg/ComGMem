@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from c_hypermem.pipeline.context import AssemblyContext
@@ -66,10 +67,22 @@ def deep_merge_dict(base: dict[str, Any], override: dict[str, Any]) -> dict[str,
         if isinstance(value, dict) and isinstance(merged.get(key), dict):
             merged[key] = deep_merge_dict(merged[key], value)
         elif isinstance(value, list) and isinstance(merged.get(key), list):
-            merged[key] = list(dict.fromkeys([*merged[key], *value]))
+            merged[key] = _dedupe_list([*merged[key], *value])
         else:
             merged[key] = value
     return merged
+
+
+def _dedupe_list(values: list[Any]) -> list[Any]:
+    seen: set[str] = set()
+    deduped: list[Any] = []
+    for value in values:
+        marker = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+        if marker in seen:
+            continue
+        seen.add(marker)
+        deduped.append(value)
+    return deduped
 
 
 def dedupe_edges(edges: list[HyperEdge]) -> list[HyperEdge]:
