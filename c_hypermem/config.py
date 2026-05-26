@@ -40,37 +40,12 @@ class NLPConfig(BaseModel):
 
 
 class IngestionConfig(BaseModel):
-    event_mode: str = "interaction"
     context_window_messages: int = 3
-    max_facts_per_event: int = 12
-    extractor: str | None = None
 
 
 class ExtractionConfig(BaseModel):
     prompt: str = "extraction/memory_extraction.md"
-    output_schema: str = "minimal_memory_candidates"
-    forbid_model_ids: bool = True
-    forbid_confidence: bool = True
     pass_node_labels_to_prompt: bool = True
-    allow_unknown_node_labels: bool = True
-
-
-class NodeIdentityDisambiguationConfig(BaseModel):
-    enabled: bool = True
-    hint_sources: list[str] = Field(default_factory=lambda: ["aliases", "local_graph", "source_scope", "metadata"])
-
-
-class NodeIdentityConfig(BaseModel):
-    strategy: str = "canonical_fingerprint"
-    include_namespace: bool = True
-    include_node_labels: bool = False
-    disambiguation: NodeIdentityDisambiguationConfig = Field(default_factory=NodeIdentityDisambiguationConfig)
-
-
-class LocalGraphPolicyConfig(BaseModel):
-    enabled: bool = True
-    allow_triples: bool = True
-    allow_attributes: bool = True
 
 
 class IndexingPolicyConfig(BaseModel):
@@ -95,7 +70,6 @@ class NodeLabelConfig(BaseModel):
     enabled: bool = True
     description: str = ""
     alias_resolution: bool = False
-    local_graph: LocalGraphPolicyConfig = Field(default_factory=LocalGraphPolicyConfig)
     indexing: IndexingPolicyConfig = Field(default_factory=IndexingPolicyConfig)
 
 
@@ -114,16 +88,8 @@ class NodeLabelsConfig(BaseModel):
         return dict(self.__pydantic_extra__ or {})
 
 
-class HyperEdgeResolutionConfig(BaseModel):
-    use_member_overlap_as_recall_signal: bool = True
-
-
 class HyperEdgesConfig(BaseModel):
-    enabled: bool = True
-    build_from_extraction: bool = True
-    merge_policy: str = "conservative"
     member_policy_default: str = "appendable"
-    resolution: HyperEdgeResolutionConfig = Field(default_factory=HyperEdgeResolutionConfig)
 
 
 class NodeSummaryMaintenanceConfig(BaseModel):
@@ -158,25 +124,6 @@ class EdgeClustersConfig(BaseModel):
     description_variants_limit: int = 8
 
 
-class LocalGraphConfig(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    enabled: bool = True
-    schema_name: str = Field(default="uniform", alias="schema")
-    configured_by_node_labels: bool = True
-
-
-class RelativeDecayConfig(BaseModel):
-    enabled: bool = True
-    unit: str = "turn"
-    decay_lambda: float = 0.03
-    access_boost: float = 0.05
-
-
-class TimeConfig(BaseModel):
-    relative_decay: RelativeDecayConfig = Field(default_factory=RelativeDecayConfig)
-
-
 class IndexConfig(BaseModel):
     lexical: str = "sqlite_fts"
     vector: str = "qdrant"
@@ -205,17 +152,13 @@ class MemoryConfig(BaseModel):
     nlp: NLPConfig = Field(default_factory=NLPConfig)
     ingestion: IngestionConfig = Field(default_factory=IngestionConfig)
     extraction: ExtractionConfig = Field(default_factory=ExtractionConfig)
-    node_identity: NodeIdentityConfig = Field(default_factory=NodeIdentityConfig)
     node_labels: NodeLabelsConfig = Field(default_factory=NodeLabelsConfig)
     turn: TurnConfig = Field(default_factory=TurnConfig)
     hyperedges: HyperEdgesConfig = Field(default_factory=HyperEdgesConfig)
     edge_clusters: EdgeClustersConfig = Field(default_factory=EdgeClustersConfig)
     maintenance: MaintenanceConfig = Field(default_factory=MaintenanceConfig)
-    local_graph: LocalGraphConfig = Field(default_factory=LocalGraphConfig)
-    time: TimeConfig = Field(default_factory=TimeConfig)
     index: IndexConfig = Field(default_factory=IndexConfig)
     retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)
-    prompt_version: str = "0.1.0"
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @classmethod

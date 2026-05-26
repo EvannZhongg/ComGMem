@@ -25,6 +25,8 @@
 - 当前默认节点标签包括：`event/fact/entity/state/preference/task/instruction/tool`。
 - `turn` 不是 `MemoryNode` 标签；它是独立的原始对话记录配置，写入 `turns` 表和 `turn_dialogue` 向量索引，不需要 `LocalNodeGraph`。
 - `node_labels.unconfigured_label_policy` 是未配置标签的处理规则；传入 prompt 时只以规则文本出现，不作为可抽取 label 名称暴露给 LLM。
+- `configs/default.yaml` 中的 `include` 是配置加载器指令，会在进入 `MemoryConfig` 前合并 `models.yaml` 和 `node_labels.yaml`，因此保留；它不是运行时配置项。
+- `prompt_version`、`node_identity.*`、顶层 `local_graph.*`、`time.relative_decay.*`、`ingestion.event_mode/max_facts_per_event/extractor`、`extraction.output_schema/forbid_model_ids/forbid_confidence/allow_unknown_node_labels`、`hyperedges.enabled/build_from_extraction/merge_policy/resolution`、以及 node label 内的 `local_graph` 策略已从当前配置中移除。这些字段此前只被 Pydantic 接收或停留在设计文档中，当前写入、抽取、索引和检索路径不会读取它们。
 
 ## 3. 当前 Schema
 

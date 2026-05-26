@@ -152,20 +152,16 @@ def test_default_config_includes_split_config_files():
     assert config.extraction.pass_node_labels_to_prompt
     assert config.turn.enabled
     assert config.turn.indexing.time_index
-    assert config.turn.time.prefer_world_time
     assert not hasattr(config.turn, "local_graph")
     assert "entity" in config.node_labels.labels
     assert "turn" not in config.node_labels.labels
     assert {"event", "fact", "entity", "state", "preference", "task", "instruction", "tool"} <= set(
         config.node_labels.labels
     )
-    assert config.node_identity.strategy == "canonical_fingerprint"
-    assert not config.node_identity.include_node_labels
-    assert config.hyperedges.basic_edge_types == ["evidence", "state", "correction"]
+    assert not hasattr(config, "node_identity")
+    assert config.hyperedges.member_policy_default == "appendable"
     assert config.edge_clusters.enabled
-    assert config.edge_clusters.maintenance_prompts.fact_merge == "maintenance/fact_merge.md"
-    assert config.edge_clusters.maintenance_prompts.contradiction_check == "maintenance/contradiction_check.md"
-    assert config.edge_clusters.background_maintenance.trigger_every_k_writes == 100
+    assert config.edge_clusters.description_variants_limit == 8
     assert config.index.vector == "qdrant"
     assert config.index.vector_store.backend == "qdrant"
     assert config.index.vector_store.collection_name == "c_hypermem_memory"
@@ -173,15 +169,14 @@ def test_default_config_includes_split_config_files():
     assert config.retrieval.lexical_top_k == 30
     assert config.retrieval.node_content_vector_top_k == 20
     assert config.retrieval.node_local_graph_vector_top_k == 20
-    assert config.retrieval.node_summary_vector_top_k == 10
     assert config.retrieval.graph_seed_top_k == 80
     assert config.retrieval.edge_coherence_alpha == 0.5
     assert config.retrieval.edge_coherence_beta == 2.0
     assert config.retrieval.final_top_k == 10
-    assert config.local_graph.configured_by_node_labels
+    assert not hasattr(config, "local_graph")
     assert config.node_labels.labels["event"].indexing.time_index
     assert dict_config.llm is not None
-    assert dict_config.node_labels.labels["fact"].property_index
+    assert dict_config.node_labels.labels["fact"].indexing.vector
 
 
 def test_embedding_model_client_is_generic_entrypoint():

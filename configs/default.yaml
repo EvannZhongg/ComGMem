@@ -6,41 +6,19 @@ storage:
   backend: sqlite
   path: runs/c_hypermem/memory.sqlite3
 
-prompt_version: 0.1.0
-
 nlp:
   # Optional spaCy model package name or local path. Relative paths are resolved from the current project working directory.
   model_path: models/en_core_web_sm
 
 ingestion:
-  event_mode: interaction
   context_window_messages: 3
-  max_facts_per_event: 12
-  extractor: null
 
 extraction:
   prompt: extraction/memory_extraction.md
-  output_schema: minimal_memory_candidates
-  forbid_model_ids: true
-  forbid_confidence: true
   pass_node_labels_to_prompt: true
-  allow_unknown_node_labels: true
-
-node_identity:
-  strategy: canonical_fingerprint
-  include_namespace: true
-  include_node_labels: false
-  disambiguation:
-    enabled: true
-    hint_sources: [aliases, local_graph, source_scope, metadata]
 
 hyperedges:
-  enabled: true
-  build_from_extraction: true
-  merge_policy: conservative
   member_policy_default: appendable
-  resolution:
-    use_member_overlap_as_recall_signal: true
 
 edge_clusters:
   enabled: true
@@ -60,18 +38,6 @@ maintenance:
     compact_after_k_sources: 10
     max_tokens: 2048
     prompt: maintenance/hyper_edge_description_compaction.md
-
-local_graph:
-  enabled: true
-  schema: uniform
-  configured_by_node_labels: true
-
-time:
-  relative_decay:
-    enabled: true
-    unit: turn
-    decay_lambda: 0.03
-    access_boost: 0.05
 
 index:
   lexical: sqlite_fts
