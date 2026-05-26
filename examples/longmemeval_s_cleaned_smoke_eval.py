@@ -17,7 +17,8 @@ from c_hypermem.config import MemoryConfig
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_FIXTURE = PROJECT_ROOT / "examples" / "longmemeval_s_cleaned_smoke_1.json"
 DEFAULT_CONFIG = PROJECT_ROOT / "configs" / "default.yaml"
-DEFAULT_RUN_DIR = PROJECT_ROOT / "runs" / "longmemeval_s_cleaned_smoke_eval"
+DEFAULT_RUN_DIR = PROJECT_ROOT / "runs" / "longmemeval_s_cleaned_smoke_1_eval"
+DEFAULT_NAMESPACE_PREFIX = "longmemeval_s_cleaned_smoke_1"
 
 
 def main() -> None:
@@ -30,7 +31,7 @@ def main() -> None:
     parser.add_argument("--fixture", type=Path, default=DEFAULT_FIXTURE)
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     parser.add_argument("--run-dir", type=Path, default=DEFAULT_RUN_DIR)
-    parser.add_argument("--namespace-prefix", default="longmemeval_s_cleaned_smoke")
+    parser.add_argument("--namespace-prefix", default=DEFAULT_NAMESPACE_PREFIX)
     parser.add_argument("--top-k", type=int, default=10)
     parser.add_argument("--max-samples", type=int, default=None, help="Limit samples for a quick local check.")
     parser.add_argument("--max-sessions", type=int, default=None, help="Limit sessions per sample.")
@@ -108,6 +109,7 @@ def main() -> None:
         "config": str(config_path),
         "sample_count": len(summaries),
         "elapsed_sec": round(time.perf_counter() - started_all, 3),
+        "metrics": _aggregate_metrics(summaries),
         "summaries": summaries,
     }
     _write_json(run_dir / "summary.json", report)
@@ -223,6 +225,7 @@ def _run_sample(
     else:
         logger.info("[%s] reuse_existing=true, skip memory build", question_id)
 
+    _ensure_turn_counter(memory, namespace)
     stats_after_ingest = memory.stats(namespace)
     logger.info("[%s] memory stats after ingest: %s", question_id, _compact_json(stats_after_ingest))
 
@@ -242,7 +245,12 @@ def _run_sample(
         )
 
     expected_answer = str(sample.get("answer") or "")
-    top_results = [_result_summary(index, result) for index, result in enumerate(results, start=1)]
+    turn_session_ids = _turn_session_ids(memory, namespace)
+    top_results = [
+        _result_summary(index, result, turn_session_ids=turn_session_ids)
+        for index, result in enumerate(results, start=1)
+    ]
+    answer_session_recall = _answer_session_recall(top_results, sample.get("answer_session_ids", []))
     return {
         "question_id": question_id,
         "question_type": sample.get("question_type"),
@@ -259,8 +267,11 @@ def _run_sample(
         "resume": resume,
         "ingest_elapsed_sec": round(time.perf_counter() - ingest_started, 3),
         "stats": stats_after_ingest,
+        "turn_session_ids": turn_session_ids,
         "top_results": top_results,
         "retrieval_contains_expected_answer": _contains_text(top_results, expected_answer),
+        "answer_session_recall": answer_session_recall,
+        "retrieval_hits_answer_session": answer_session_recall["hit"],
     }
 
 
@@ -321,20 +332,89 @@ def _conversation_pairs(messages: list[dict[str, Any]], *, max_pairs: int | None
     return pairs
 
 
-def _result_summary(rank: int, result: dict[str, Any]) -> dict[str, Any]:
+def _result_summary(rank: int, result: dict[str, Any], *, turn_session_ids: dict[str, str]) -> dict[str, Any]:
     metadata = dict(result.get("metadata") or {})
+    source_turn_ids = _collect_source_turn_ids(metadata)
+    source_session_ids = _source_session_ids_for_turns(source_turn_ids, turn_session_ids)
     return {
         "rank": rank,
         "id": result.get("id"),
         "score": result.get("score"),
         "content": result.get("content"),
-        "edge_type": metadata.get("edge_type"),
-        "edge_relation": metadata.get("edge_relation"),
         "edge_node_ids": metadata.get("edge_node_ids", []),
         "channels": metadata.get("channels", []),
         "hit_node_ids": metadata.get("hit_node_ids", []),
+        "source_turn_ids": source_turn_ids,
+        "source_session_ids": source_session_ids,
+        "relative_time": metadata.get("relative_time", {}),
+        "edge_metadata": metadata.get("edge_metadata", {}),
         "edge_nodes": metadata.get("edge_nodes", []),
+        "periphery_edges": metadata.get("periphery_edges", []),
+        "periphery_nodes": metadata.get("periphery_nodes", []),
         "score_parts": metadata.get("score_parts", {}),
+    }
+
+
+def _turn_session_ids(memory: Memory, namespace: str) -> dict[str, str]:
+    rows = memory.store.conn.execute(
+        """
+        SELECT DISTINCT turn_id, turn_metadata_json
+        FROM turns
+        WHERE namespace = ?
+        """,
+        (namespace,),
+    ).fetchall()
+    mapping: dict[str, str] = {}
+    for row in rows:
+        turn_id = str(row["turn_id"])
+        try:
+            metadata = json.loads(row["turn_metadata_json"] or "{}")
+        except json.JSONDecodeError:
+            continue
+        session_id = (
+            metadata.get("source_session_id")
+            or metadata.get("session_id")
+            or metadata.get("conversation_id")
+        )
+        if session_id:
+            mapping[turn_id] = str(session_id)
+    return mapping
+
+
+def _ensure_turn_counter(memory: Memory, namespace: str) -> None:
+    if namespace not in memory._turn_counters:
+        memory._turn_counters[namespace] = memory.store.next_turn_index(namespace)
+
+
+def _answer_session_recall(
+    top_results: list[dict[str, Any]],
+    answer_session_ids: Any,
+) -> dict[str, Any]:
+    expected = _string_set(answer_session_ids)
+    retrieved_by_rank: list[dict[str, Any]] = []
+    hit_ranks: list[int] = []
+    for result in top_results:
+        rank = int(result.get("rank") or 0)
+        sessions = _string_set(result.get("source_session_ids", []))
+        hits = sorted(expected.intersection(sessions))
+        retrieved_by_rank.append(
+            {
+                "rank": rank,
+                "source_session_ids": sorted(sessions),
+                "matched_answer_session_ids": hits,
+            }
+        )
+        if hits and rank:
+            hit_ranks.append(rank)
+    retrieved = sorted({session_id for item in retrieved_by_rank for session_id in item["source_session_ids"]})
+    matched = sorted(expected.intersection(retrieved))
+    return {
+        "answer_session_ids": sorted(expected),
+        "retrieved_source_session_ids": retrieved,
+        "matched_answer_session_ids": matched,
+        "hit": bool(matched),
+        "first_hit_rank": min(hit_ranks) if hit_ranks else None,
+        "by_rank": retrieved_by_rank,
     }
 
 
@@ -364,11 +444,69 @@ def _completed_pair_keys(memory: Memory, namespace: str) -> set[tuple[str, int]]
     return keys
 
 
+def _collect_source_turn_ids(value: Any) -> list[str]:
+    collected: list[str] = []
+
+    def visit(item: Any) -> None:
+        if isinstance(item, dict):
+            if "source_turn_ids" in item:
+                collected.extend(_strings(item.get("source_turn_ids")))
+            for child in item.values():
+                visit(child)
+        elif isinstance(item, list):
+            for child in item:
+                visit(child)
+
+    visit(value)
+    return list(dict.fromkeys(collected))
+
+
+def _source_session_ids_for_turns(source_turn_ids: list[str], turn_session_ids: dict[str, str]) -> list[str]:
+    return list(dict.fromkeys(turn_session_ids[turn_id] for turn_id in source_turn_ids if turn_id in turn_session_ids))
+
+
+def _aggregate_metrics(summaries: list[dict[str, Any]]) -> dict[str, Any]:
+    sample_count = len(summaries)
+    answer_text_hits = sum(1 for item in summaries if item.get("retrieval_contains_expected_answer"))
+    answer_session_hits = sum(1 for item in summaries if item.get("retrieval_hits_answer_session"))
+    first_hit_ranks = [
+        item["answer_session_recall"]["first_hit_rank"]
+        for item in summaries
+        if (item.get("answer_session_recall") or {}).get("first_hit_rank") is not None
+    ]
+    return {
+        "sample_count": sample_count,
+        "answer_text_hit_count": answer_text_hits,
+        "answer_text_hit_rate": _rate(answer_text_hits, sample_count),
+        "answer_session_hit_count": answer_session_hits,
+        "answer_session_hit_rate": _rate(answer_session_hits, sample_count),
+        "answer_session_first_hit_ranks": first_hit_ranks,
+    }
+
+
 def _contains_text(results: list[dict[str, Any]], needle: str) -> bool:
     normalized = needle.strip().lower()
     if not normalized:
         return False
     return any(normalized in json.dumps(result, ensure_ascii=False).lower() for result in results)
+
+
+def _string_set(value: Any) -> set[str]:
+    return set(_strings(value))
+
+
+def _strings(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if value in (None, "", [], {}):
+        return []
+    return [str(value).strip()]
+
+
+def _rate(count: int, total: int) -> float:
+    if total <= 0:
+        return 0.0
+    return round(count / total, 4)
 
 
 def _configure_logging(run_dir: Path) -> logging.Logger:

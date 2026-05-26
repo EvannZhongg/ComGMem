@@ -37,6 +37,8 @@ Return exactly one JSON object adhering strictly to `{{STRICT_JSON_SHAPE}}`. Nev
 * `nodes[].ref`: A temporary local reference (e.g., "n1").
 * `nodes[].canonical_text`: A concise standalone statement, understandable without the original message.
 * `nodes[].triples`: Describe the node's internal attributes (subject, predicate, object). Leave empty if not applicable.
+* Each `nodes[].triples[]` object may contain only `subject`, `predicate`, `object`, and optional `qualifiers`; never output `subject_label`, `object_label`, or any other extra triple field.
+* Every `triples[] ` item must include non-empty subject, predicate, and object; qualifiers may only be attached to a complete triple and must never appear as a standalone triple item.
 * `edge_summaries`: Use purely for natural-language descriptions of why a group of nodes should be viewed together. Do not type edges or assign roles.
 * `nodes[].edge_summary_refs`: Link the node to the relevant `edge_summaries[].ref`.
 
