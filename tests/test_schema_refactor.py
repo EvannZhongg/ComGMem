@@ -218,6 +218,10 @@ def test_llm_memory_extractor_prompt_and_parser_use_nodes_and_edge_summaries():
         in llm.prompts[0]
     )
     assert '{"subject": "morning interview", "predicate": "has_reminder", "object": "calendar reminder"}' in llm.prompts[0]
+    assert (
+        '{"subject": "morning interview", "predicate": "scheduled_part_of_day", "object": "morning"}'
+        in llm.prompts[0]
+    )
     assert '"entities", "events", "assertions"' not in llm.prompts[0]
 
 

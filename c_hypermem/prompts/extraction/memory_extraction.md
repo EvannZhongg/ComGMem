@@ -42,6 +42,7 @@ Return exactly one JSON object adhering strictly to `{{STRICT_JSON_SHAPE}}`. Nev
 * Every `triples[] ` item must include non-empty subject, predicate, and object; qualifiers may only be attached to a complete triple and must never appear as a standalone triple item.
 * `edge_summaries`: Describe the coherent interaction, event, or situation that connects the linked nodes, such as a user request and assistant response. Keep descriptions specific but concise; do not type edges or assign roles.
 * `nodes[].edge_summary_refs`: Link the node to the relevant `edge_summaries[].ref`.
+* Every node should reference at least one relevant `edge_summaries[].ref`; leave `edge_summary_refs` empty only when the node is genuinely standalone.
 
 # Output JSON
 
@@ -86,7 +87,8 @@ Return exactly one JSON object:
       "canonical_text": "Morning interview.",
       "summaries": ["The morning interview is the appointment that the calendar reminder concerns."],
       "triples": [
-        {"subject": "morning interview", "predicate": "has_reminder", "object": "calendar reminder"}
+        {"subject": "morning interview", "predicate": "has_reminder", "object": "calendar reminder"},
+        {"subject": "morning interview", "predicate": "scheduled_part_of_day", "object": "morning"}
       ],
       "edge_summary_refs": ["e2"]
     }
