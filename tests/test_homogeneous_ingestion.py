@@ -882,14 +882,16 @@ def test_node_summary_compaction_requires_maintenance_llm(tmp_path):
 def test_local_triple_maintenance_keep_new_retires_existing_triple_and_reindexes(tmp_path):
     maintenance_llm = MaintenanceLLM(
         [
-            [
-                {
-                    "decision": "keep_new",
-                    "affected_existing_refs": ["existing:0"],
-                    "merged_triple": None,
-                    "rationale": "The new location replaces the old location.",
-                }
-            ]
+            {
+                "decisions": [
+                    {
+                        "decision": "keep_new",
+                        "affected_existing_refs": ["existing:0"],
+                        "merged_triple": None,
+                        "rationale": "The new location replaces the old location.",
+                    }
+                ]
+            }
         ]
     )
     embedding_client = RecordingEmbeddingClient()
@@ -950,14 +952,16 @@ def test_local_triple_maintenance_keep_new_retires_existing_triple_and_reindexes
 def test_local_triple_maintenance_keep_existing_reindexes_active_graph_without_incoming(tmp_path):
     maintenance_llm = MaintenanceLLM(
         [
-            [
-                {
-                    "decision": "keep_existing",
-                    "affected_existing_refs": ["existing:0"],
-                    "merged_triple": None,
-                    "rationale": "The existing triple already covers the incoming triple.",
-                }
-            ]
+            {
+                "decisions": [
+                    {
+                        "decision": "keep_existing",
+                        "affected_existing_refs": ["existing:0"],
+                        "merged_triple": None,
+                        "rationale": "The existing triple already covers the incoming triple.",
+                    }
+                ]
+            }
         ]
     )
     embedding_client = RecordingEmbeddingClient()
@@ -1047,14 +1051,16 @@ def test_local_triple_maintenance_duplicate_spo_merges_turn_provenance_without_l
 def test_local_triple_maintenance_keep_both_preserves_compatible_values(tmp_path):
     maintenance_llm = MaintenanceLLM(
         [
-            [
-                {
-                    "decision": "keep_both",
-                    "affected_existing_refs": [],
-                    "merged_triple": None,
-                    "rationale": "Both preferences can coexist.",
-                }
-            ]
+            {
+                "decisions": [
+                    {
+                        "decision": "keep_both",
+                        "affected_existing_refs": [],
+                        "merged_triple": None,
+                        "rationale": "Both preferences can coexist.",
+                    }
+                ]
+            }
         ]
     )
     memory = Memory.from_config(
@@ -1139,19 +1145,21 @@ def test_local_triple_maintenance_accepts_decisions_object_response(tmp_path):
 def test_local_triple_maintenance_merge_replaces_candidates_with_merged_triple(tmp_path):
     maintenance_llm = MaintenanceLLM(
         [
-            [
-                {
-                    "decision": "merge",
-                    "affected_existing_refs": ["existing:0"],
-                    "merged_triple": {
-                        "subject": "Alice",
-                        "predicate": "works_at",
-                        "object": "OpenAI in San Francisco",
-                        "qualifiers": {"specificity": "city"},
-                    },
-                    "rationale": "The new triple is a more specific version.",
-                }
-            ]
+            {
+                "decisions": [
+                    {
+                        "decision": "merge",
+                        "affected_existing_refs": ["existing:0"],
+                        "merged_triple": {
+                            "subject": "Alice",
+                            "predicate": "works_at",
+                            "object": "OpenAI in San Francisco",
+                            "qualifiers": {"specificity": "city"},
+                        },
+                        "rationale": "The new triple is a more specific version.",
+                    }
+                ]
+            }
         ]
     )
     memory = Memory.from_config(
@@ -1195,20 +1203,22 @@ def test_local_triple_maintenance_merge_replaces_candidates_with_merged_triple(t
 def test_local_triple_maintenance_batches_multiple_conflicts_for_same_node(tmp_path):
     maintenance_llm = MaintenanceLLM(
         [
-            [
-                {
-                    "decision": "keep_new",
-                    "affected_existing_refs": ["existing:0"],
-                    "merged_triple": None,
-                    "rationale": "The new city replaces the older residence.",
-                },
-                {
-                    "decision": "keep_both",
-                    "affected_existing_refs": [],
-                    "merged_triple": None,
-                    "rationale": "Both preferences can coexist.",
-                },
-            ]
+            {
+                "decisions": [
+                    {
+                        "decision": "keep_new",
+                        "affected_existing_refs": ["existing:0"],
+                        "merged_triple": None,
+                        "rationale": "The new city replaces the older residence.",
+                    },
+                    {
+                        "decision": "keep_both",
+                        "affected_existing_refs": [],
+                        "merged_triple": None,
+                        "rationale": "Both preferences can coexist.",
+                    },
+                ]
+            }
         ]
     )
     memory = Memory.from_config(

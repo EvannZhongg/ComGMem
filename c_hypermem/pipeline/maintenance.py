@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field
 
 from c_hypermem.config import MemoryConfig
 from c_hypermem.errors import ConfigError
@@ -557,9 +557,7 @@ class LocalTripleMergeBatchResult(BaseModel):
 
 
 def _parse_local_triple_merge_decisions(payload: Any) -> list["LocalTripleMergeDecision"]:
-    if isinstance(payload, dict) and "decisions" in payload:
-        return LocalTripleMergeBatchResult.model_validate(payload).decisions
-    return TypeAdapter(list[LocalTripleMergeDecision]).validate_python(payload)
+    return LocalTripleMergeBatchResult.model_validate(payload).decisions
 
 
 class TokenCounter:
