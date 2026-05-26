@@ -40,6 +40,7 @@ class NLPConfig(BaseModel):
 
 
 class IngestionConfig(BaseModel):
+    pass_recent_context: bool = True
     context_window_messages: int = 3
 
 

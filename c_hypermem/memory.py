@@ -237,6 +237,8 @@ class Memory:
         self.store.upsert_nodes(touched)
 
     def _recent_context(self, namespace: str) -> list[Message]:
+        if not self.config.ingestion.pass_recent_context:
+            return []
         window_size = max(0, self.config.ingestion.context_window_messages)
         if window_size == 0:
             return []

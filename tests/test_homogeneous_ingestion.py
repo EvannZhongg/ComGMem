@@ -53,6 +53,8 @@ def test_default_config_uses_global_token_counting_config():
     assert config.retrieval.hyper_edge_description_vector_top_k == 10
     assert config.retrieval.cluster_periphery_edge_limit == 20
     assert config.retrieval.cluster_periphery_node_limit == 50
+    assert default_raw["ingestion"]["pass_recent_context"] is True
+    assert config.ingestion.pass_recent_context
     assert config.edge_clusters.stop_nodes == ["User", "Assistant"]
     assert "description_variants_limit" not in default_raw["edge_clusters"]
     assert not hasattr(config.edge_clusters, "description_variants_limit")
@@ -63,6 +65,29 @@ def test_default_config_uses_global_token_counting_config():
     assert "nlp" not in default_raw
     assert "edge_cluster" not in default_raw["maintenance"]
     assert not hasattr(config.maintenance, "edge_cluster")
+
+
+def test_ingestion_can_disable_recent_context(tmp_path):
+    extractor = RecordingWindowExtractor()
+    memory = Memory.from_config(
+        {
+            "storage": {"path": str(tmp_path / "memory.sqlite3")},
+            "ingestion": {"pass_recent_context": False, "context_window_messages": 3},
+        },
+        extractor=extractor,
+    )
+    namespace = "disabled_context_ns"
+    memory.reset(namespace)
+
+    memory.add_memory("First turn.", namespace=namespace)
+    memory.add_memory("Second turn.", namespace=namespace)
+    memory.close()
+
+    assert [[message.content for message in window.target] for window in extractor.windows] == [
+        ["First turn."],
+        ["Second turn."],
+    ]
+    assert [[message.content for message in window.context] for window in extractor.windows] == [[], []]
 
 
 def test_ingestion_builds_nodes_and_description_only_hyperedges(tmp_path):
@@ -1717,6 +1742,15 @@ class SequenceHomogeneousExtractor:
         payload = self.payloads[self.index]
         self.index += 1
         return MemoryExtraction.model_validate(payload)
+
+
+class RecordingWindowExtractor:
+    def __init__(self):
+        self.windows = []
+
+    def extract(self, window, context):
+        self.windows.append(window)
+        return MemoryExtraction()
 
 
 def _single_entity_payload(summary, *, triples=None, edge_description="Alice profile."):

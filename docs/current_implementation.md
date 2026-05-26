@@ -19,7 +19,7 @@
 - 仅读取 C-HyperMem 项目根目录下的 `.env`，当前可以直接使用`.env`调用模型进行测试。
 - `.env` 已加入 `.gitignore`，仓库提供 `.env.example`。
 - `embedding.batch_size` 已加入配置，默认值为 `10`。
-- `ingestion.context_window_messages` 控制传给抽取模型的最近上下文消息数，默认值为 `3`。
+- `ingestion.pass_recent_context` 控制是否把最近历史传给抽取模型，默认值为 `true`；开启时由 `ingestion.context_window_messages` 控制最近上下文 turn 数，默认值为 `3`。
 - `index.vector` 默认改为 `qdrant`；`index.vector_store` 提供本地 Qdrant 路径和 collection 名称，默认无需用户额外配置服务端。
 - `maintenance` 是顶层配置；当前只包含 `node_summary.*`、`local_triples.*` 和 `hyper_edge_description.*`，不再包含 EdgeCluster 维护入口。
 - 当前默认节点标签包括：`event/fact/entity/state/preference/task/instruction/tool`。
@@ -330,7 +330,7 @@ SearchResult 当前结构要点：
 
 - **事件驱动增量抽取**
   设计方向：每次只抽取最新 target，同时提供最近上下文辅助理解。
-  当前方案：删除 `ingestion_cache` 表和应用层 hash/cache 游标配置；原始消息写入独立 `turns` 表；`LLMMemoryExtractor` 接收 `ExtractionWindow(context, target)`，`context_window_messages` 控制上下文 K。
+  当前方案：删除 `ingestion_cache` 表和应用层 hash/cache 游标配置；原始消息写入独立 `turns` 表；`LLMMemoryExtractor` 接收 `ExtractionWindow(context, target)`，`pass_recent_context` 控制是否传入最近上下文，`context_window_messages` 控制开启时的上下文 K。
   原因：避免在应用层维护容易失真的 prefix/cursor 状态机，把重复 system prompt 的成本交给模型服务端 prompt caching，同时保留必要的语境消解能力。
 
 - **交互日志与知识图谱分离**

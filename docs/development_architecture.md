@@ -1484,6 +1484,7 @@ default_top_k: 10
 
 ingestion:
   event_mode: session
+  pass_recent_context: true
   context_window_messages: 3
   max_facts_per_event: 12
 

@@ -7,6 +7,7 @@ storage:
   path: runs/c_hypermem/memory.sqlite3
 
 ingestion:
+  pass_recent_context: false
   context_window_messages: 3
 
 extraction:
