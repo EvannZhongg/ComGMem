@@ -5,9 +5,10 @@
 当前约束：
 
 - `retrieval.query_analysis: false` 是唯一当前开发目标。
-- 不使用 `c_hypermem/prompts/retrieval/query_analysis.md`。
-- 不加载 spaCy。
-- 不做规则化 query 抽取。
+- 当前 false 链路不使用 `c_hypermem/prompts/retrieval/query_analysis.md`。
+- 当前 false 链路不加载 spaCy。
+- `nlp` / `llm` query analysis 只保留为未来扩展入口；当前不参与默认开发链路。
+- 不做规则化 query 抽取，尤其不从 query 中用规则抽取 entity candidates。
 - 不做兜底召回策略。
 - 当前仍是开发环境，不考虑旧数据迁移或兼容。
 
@@ -127,6 +128,7 @@ S_coherence(E) =
 - `content`: edge description + edge 内 node 内容
 - `score`: edge-level score
 - `metadata.edge_nodes`: 该 edge 内包含的 MemoryNode 列表
+- `metadata.edge_metadata`: 系统写入的 edge metadata，例如 `source_turn_ids`
 
 Edge-level score 当前来自 edge 内成员 node 在图谱扩散后的最高分：
 
@@ -140,10 +142,11 @@ S_edge = max(S_node for node in edge_nodes)
 
 最终返回单位是 HyperEdge，而不是单个 MemoryNode。每条结果应包含：
 
-- edge identity、relation、description、roles。
+- edge identity、description、system metadata。
 - edge-level score 与可解释 score parts。
 - edge 内成员 nodes。
 - 每个 node 的内容、分数来源和 triples。
+- 每个 node 的系统来源字段，例如 `source_turn_ids`、`node_metadata`。
 - 如果 edge 属于 EdgeCluster，附带 cluster id 和 description variants。
 
 具体 JSON metadata 字段以 `current_implementation.md` 为准。

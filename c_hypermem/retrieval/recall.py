@@ -120,8 +120,6 @@ class Retriever:
             "channels": sorted(fused.channels),
             "score_parts": fused.score_parts,
             "matched_vector_items": fused.vector_hits,
-            "source_session_id": node.metadata.get("source_session_id"),
-            "source_event_id": node.metadata.get("source_event_id"),
             "source_turn_ids": node.metadata.get("source_turn_ids", []),
             "time": node.time.model_dump(mode="json"),
             "node_metadata": node.metadata,

@@ -231,7 +231,8 @@ SearchResult 当前结构要点：
 - `id`：`edge_id`。
 - `content`：edge description 加 edge 内 node 内容。
 - `score`：edge-level score，当前取 edge 内成员 node 的最高分。
-- `metadata.edge_nodes`：该 edge 内的 nodes，每个 node 带 `node_id/content/summary/score/channels/score_parts/matched_vector_items/triples/time/node_metadata`。
+- `metadata.edge_metadata`：系统写入的 edge metadata，例如 `source_turn_ids`。
+- `metadata.edge_nodes`：该 edge 内的 nodes，每个 node 带 `node_id/content/summary/score/channels/score_parts/matched_vector_items/source_turn_ids/triples/time/node_metadata`；不再暴露旧 `source_session_id/source_event_id`。
 - `metadata.cluster_description_variants`：如果 edge 属于 EdgeCluster，会带出 cluster 的 description variants。
 
 当前仍不接入：
