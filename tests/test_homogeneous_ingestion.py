@@ -1123,6 +1123,60 @@ def test_local_triple_maintenance_routes_same_turn_initial_node_conflicts(tmp_pa
     assert node.metadata["maintenance"]["local_triples"]["decision_count"] == 1
 
 
+def test_local_triple_maintenance_same_turn_merge_dedupes_turn_id(tmp_path):
+    maintenance_llm = MaintenanceLLM(
+        [
+            {
+                "decisions": [
+                    {
+                        "decision": "merge",
+                        "affected_existing_refs": ["existing:0"],
+                        "merged_triple": {
+                            "subject": "Alice",
+                            "predicate": "likes",
+                            "object": "tea and coffee",
+                            "qualifiers": {},
+                        },
+                        "rationale": "Both values are compatible preferences from the same turn.",
+                    }
+                ]
+            }
+        ]
+    )
+    memory = Memory.from_config(
+        {"storage": {"path": str(tmp_path / "memory.sqlite3")}},
+        extractor=SequenceHomogeneousExtractor(
+            [
+                _single_entity_payload(
+                    "Alice likes tea and coffee.",
+                    triples=[
+                        {"subject": "Alice", "predicate": "likes", "object": "tea"},
+                        {"subject": "Alice", "predicate": "likes", "object": "coffee"},
+                    ],
+                )
+            ]
+        ),
+        maintenance_llm=maintenance_llm,
+    )
+    namespace = "local_triple_same_turn_merge_ns"
+    memory.reset(namespace)
+
+    memory.add_memory("I like tea and coffee.", namespace=namespace)
+    node = memory.store.list_nodes(namespace)[0]
+    memory.close()
+
+    assert maintenance_llm.call_count == 1
+    assert "prefer `merge` over" in maintenance_llm.prompts[0]
+    assert [(triple.object, triple.status) for triple in node.local_graph.triples] == [
+        ("tea", "retired"),
+        ("tea and coffee", "active"),
+    ]
+    merged = node.local_graph.triples[1]
+    assert merged.qualifiers["source_turn_ids"] == ["turn:0"]
+    assert merged.qualifiers["maintenance_merged_source_turn_ids"] == ["turn:0"]
+    assert len(merged.qualifiers["source_triple_ids"]) == 2
+
+
 def test_local_triple_maintenance_requires_llm_for_same_turn_initial_node_conflicts(tmp_path):
     memory = Memory.from_config(
         {"storage": {"path": str(tmp_path / "memory.sqlite3")}},

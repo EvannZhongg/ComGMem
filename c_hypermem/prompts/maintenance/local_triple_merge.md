@@ -1,6 +1,6 @@
 ---
 id: maintenance.local_triple_merge
-version: 0.1.1
+version: 0.1.2
 owner: c_hypermem
 stage: local_triple_sp_overlap_batch
 ---
@@ -48,6 +48,10 @@ handled semantically.
 - `merged_triple` may contain only `subject`, `predicate`, `object`, and
   `qualifiers`; do not include system-owned fields such as `status`, `triple_id`,
   source metadata, timestamps, or confidence scores.
+- When the incoming triple and affected existing triples come from the same
+  turn, treat them as parts of one extraction context. If their facts are
+  compatible and can be stated more clearly as one triple, prefer `merge` over
+  `keep_both`.
 
 # Node Context
 
