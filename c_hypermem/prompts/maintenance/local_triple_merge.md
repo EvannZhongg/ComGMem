@@ -14,10 +14,6 @@ calls you with a batch of conflicts only after deterministic candidate
 selection finds matching normalized subject and predicate for each incoming
 triple.
 
-The system owns all IDs, source tracking, graph writes, timestamps, vector
-indexes, and status updates. You only decide how the new triple should be
-handled semantically.
-
 # Decisions
 
 - `keep_existing`: the existing triple already covers the new triple, or the new
