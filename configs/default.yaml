@@ -57,7 +57,7 @@ retrieval:
   final_top_k: 10
 
 recall:
-  cluster_periphery_edge_limit: 20
+  cluster_periphery_edge_limit: 15
   cluster_periphery_node_limit: 50
-  node_triple_limit: 20
+  node_triple_limit: 30
   include_turn_ids_in_context: true

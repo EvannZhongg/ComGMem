@@ -64,7 +64,7 @@
 
 | 维护点 | 当前实现 | 差异判断 |
 | --- | --- | --- |
-| 一次抽取 | LLM 只输出 `nodes/edge_summaries/metadata`；schema 拒绝旧 `entities/events/assertions/sources` | 已对齐新架构 |
+| 一次抽取 | LLM 只输出 `nodes/edge_summaries`；schema 拒绝旧 `entities/events/assertions/sources` 和顶层抽取 metadata | 已对齐新架构 |
 | Node summary | `ExtractedNode.summaries` 可为空；`NodeBuilder` 将非空 summaries 拼成 `MemoryNode.summary` | 不保证每个 node 都有 summary |
 | Node summary 维护 | `GraphMaintenance.merge_node()` 按系统 `source_turn_ids` 追踪 summary 来源；低于 `k` 时字符串拼接；达到来源数或 token 上限时调用 `node_summary_compaction` prompt 压缩 | 已完成第一阶段 Node summary 维护 |
 | Entity alias 复用 | 仅带 `entity` label 的节点使用 `canonical_text + metadata.aliases` 写入/查询 alias index | 已实现精确复用，不做模糊消歧 |
@@ -94,7 +94,7 @@
 2. 分配 `turn_id` / `turn_index`。
 3. 把原始消息写入 `turns` 表。
 4. 将最近 K 个 turn messages 作为 context，把本次消息作为 target 交给 extractor。
-5. `LLMMemoryExtractor` 或显式 extractor 返回 `MemoryExtraction(nodes, edge_summaries, metadata)`。
+5. `LLMMemoryExtractor` 或显式 extractor 返回 `MemoryExtraction(nodes, edge_summaries)`。
 6. `GraphAssembler` 生成 nodes / edges / edge_clusters / edge_cluster_members / entity_aliases。
 7. `GraphAssembler` 对新建 node 和同 node_id / entity alias 复用 node 都调用 `GraphMaintenance.merge_node(...)`；LocalTriple 在两种写入中维护，Node summary 的跨来源拼接在复用路径维护。
 8. `Memory._persist_output(...)` 写入 SQLite，并更新 FTS / Qdrant side indexes。

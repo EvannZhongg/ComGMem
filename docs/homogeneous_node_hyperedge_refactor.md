@@ -70,7 +70,6 @@
 - `MemoryExtraction` 改为：
   - `nodes`
   - `edge_summaries`
-  - `metadata`
 - `LocalNodeGraph` 去掉或废弃：
   - `attributes`
   - `roles`
@@ -346,7 +345,7 @@ ExtractedEdgeSummary + member nodes -> HyperEdge(description, node_ids)
 
 - 已完成：`docs/hypergraph_memory_architecture.md` 已调整为同构节点、`nodes/edge_summaries`、description-only HyperEdge、系统绑定 `source_turn_ids`、可选 inferred metadata 的设计方向。
 - 已完成：本文档新增，列出重构顺序和影响模块。
-- 已完成：代码 schema 重构，`MemoryExtraction` 主入口已切换为 `nodes/edge_summaries/metadata`，schema 层拒绝旧抽取 shape 与 LLM 来源/typed-edge 字段。
+- 已完成：代码 schema 重构，`MemoryExtraction` 主入口已切换为 `nodes/edge_summaries`，schema 层拒绝旧抽取 shape、顶层抽取 metadata 与 LLM 来源/typed-edge 字段。
 - 已完成：抽取 prompt 和 parser 重构，`memory_extraction.md` 只要求 `nodes/edge_summaries`，`normalize_extraction_payload()` 不再接受或映射 `entities/events/assertions/sources`。
 - 已完成：`NodeBuilder.build_node()` 消费 `ExtractedNode`，`LocalGraphBuilder` 只规范化和去重 node 内 triples，不再按 event/fact/entity 写死 triples。
 - 已完成：`GraphAssembler` 按 `edge_summary_refs` 反向组装 description-only HyperEdge，并从 `context.metadata.turn_ids` 写入 MemoryNode / HyperEdge metadata 的 `source_turn_ids`。

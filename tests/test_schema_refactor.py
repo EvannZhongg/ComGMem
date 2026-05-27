@@ -39,7 +39,6 @@ def test_memory_extraction_accepts_nodes_and_edge_summaries():
                     "edge_summary_refs": ["e1"],
                 }
             ],
-            "metadata": {"schema_version": "homogeneous_nodes_v1"},
         }
     )
 
@@ -92,6 +91,7 @@ def test_memory_extraction_accepts_nodes_and_edge_summaries():
             "nodes": [],
             "edge_summaries": [{"ref": "e1", "description": "A relation.", "polarity": "positive"}],
         },
+        {"nodes": [], "edge_summaries": [], "metadata": {"schema_version": "homogeneous_nodes_v1"}},
     ],
 )
 def test_memory_extraction_rejects_old_extraction_shape_and_llm_source_or_edge_fields(payload):
@@ -206,7 +206,8 @@ def test_llm_memory_extractor_prompt_and_parser_use_nodes_and_edge_summaries():
     extraction = extractor.extract(window, ExtractionContext(namespace="test", metadata={}, current_turn=0))
 
     assert extraction.nodes[0].canonical_text == "Alice prefers morning interviews."
-    assert '"nodes", "edge_summaries"' in llm.prompts[0]
+    assert 'keys "nodes" and "edge_summaries"' in llm.prompts[0]
+    assert 'optional "metadata"' not in llm.prompts[0]
     assert "Do not output sources, source_ref, source_refs" in llm.prompts[0]
     assert "polarity, nodes[].time, confidence" in llm.prompts[0]
     assert "`nodes`: The only carrier for memory objects" in llm.prompts[0]

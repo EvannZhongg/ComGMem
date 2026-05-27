@@ -92,8 +92,7 @@ Return exactly one JSON object:
       ],
       "edge_summary_refs": ["e2"]
     }
-  ],
-  "metadata": {}
+  ]
 }
 ```
 

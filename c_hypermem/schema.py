@@ -119,7 +119,6 @@ class MemoryExtraction(BaseModel):
 
     nodes: list[ExtractedNode] = Field(default_factory=list)
     edge_summaries: list[ExtractedEdgeSummary] = Field(default_factory=list)
-    metadata: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def validate_extraction_refs(self) -> "MemoryExtraction":

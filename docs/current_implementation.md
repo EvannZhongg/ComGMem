@@ -37,7 +37,7 @@
 - `LocalNodeGraph`：所有节点共享的局部图结构，只包含统一 triples；旧 `attributes/roles` 已从 schema 移除。
 - `ExtractedNode`：新的抽取节点候选，包含 `ref/labels/canonical_text/summaries/triples/edge_summary_refs/metadata`。节点构建时间由系统写入，不由 LLM 输出。
 - `ExtractedEdgeSummary`：新的抽取边摘要候选，包含 `ref/description/metadata`。
-- `MemoryExtraction`：LLM 一次抽取输出主入口已切换为 `nodes/edge_summaries/metadata`；旧 `entities/events/assertions/sources` 不再是主抽取 schema 字段。
+- `MemoryExtraction`：LLM 一次抽取输出主入口已切换为 `nodes/edge_summaries`；旧 `entities/events/assertions/sources` 不再是主抽取 schema 字段，顶层抽取 `metadata` 不再保留。
 
 Schema 层当前会拒绝旧抽取 shape，以及 LLM 输出的 `sources/source_refs/source_ref/edge_type/relation/polarity/roles/time` 等不应由模型生成的来源、typed-edge 或构建时间字段。系统 ID 由 `utils/ids.py` 生成，LLM 不生成 `node_id/edge_id/triple_id`。
 

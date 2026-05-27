@@ -149,7 +149,7 @@ def _render_prompt_template(
 
 def _strict_json_shape() -> str:
     return (
-        'Return one JSON object with keys "nodes", "edge_summaries", and optional "metadata". '
+        'Return one JSON object with keys "nodes" and "edge_summaries". '
         "Each node must have ref, labels, canonical_text, summaries, triples, edge_summary_refs, and optional metadata. "
         "Each edge summary must have ref, description, and optional metadata. "
         "Use Context only to resolve references and extract memories only from Target. "
