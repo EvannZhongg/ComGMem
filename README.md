@@ -1,49 +1,156 @@
-# C-HyperMem: Composite Hypergraph Memory for Long-Term Conversational Agent Reasoning
+# C-HyperMem
 
-## 快速开始
+C-HyperMem 是一个面向长期对话 Agent 的复合超图记忆包。
+
+它把抽取到的长期记忆保存为可复用的 `MemoryNode`，再用 description-only 的 `HyperEdge` 连接相关节点，并通过轻量 `EdgeCluster` 在检索时带出相邻上下文。节点内部的 `LocalTriple` 用来表达紧凑事实；系统负责生成所有 ID、来源追踪、时间、维护元数据和索引。
+
+当前写入路径保持保守：
+
+- LLM 只做一次抽取，输出 `nodes` 和 `edge_summaries`；
+- 系统组装节点、局部三元组、超边、簇和来源 metadata；
+- 同一节点内 subject/predicate 相同但 object 不同的 triples 会进入 `maintenance/local_triple_merge.md` 做语义路由；
+- 检索融合 SQLite FTS、node content 向量、node-local-graph 向量和 HyperEdge description 向量。
+
+## 安装
+
+在 `C-HyperMem` 项目根目录执行：
 
 ```powershell
-git clone https://github.com/EvannZhongg/C-HyperMem.git
-cd C-HyperMem
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-pip install -e ".[llms,embeddings,vector,dev]"
+pip install -e ".[llms,embeddings,vector]"
 ```
 
-如果需要启用 `retrieval.query_analysis: nlp`，再单独安装 NLP 依赖和 spaCy 英文模型：
+如果需要启用 `retrieval.query_analysis: nlp`，再安装 spaCy 依赖和英文模型：
 
 ```powershell
 pip install -e ".[nlp]"
 python -m pip install https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl --target models/en_core_web_sm --no-deps
 ```
 
-`configs/models.yaml` 中的 `nlp.model_path` 默认是 `models/en_core_web_sm`。代码会按当前工作目录解析相对路径；默认从 `C-HyperMem` 根目录启动时，上面的命令会把模型安装到项目内的 `models/en_core_web_sm`，并能被 `retrieval.query_analysis: nlp` 加载。如果你希望使用当前 Python 环境里的 spaCy 模型包，也可以把 `nlp.model_path` 改成 `en_core_web_sm`，然后运行 `python -m spacy download en_core_web_sm`。
+`configs/models.yaml` 默认把 `nlp.model_path` 指向 `models/en_core_web_sm`。建议从 `C-HyperMem` 根目录运行脚本，避免相对路径解析偏移。
 
-在 `C-HyperMem\.env` 中配置模型环境变量，例如：
+## 模型配置
+
+`configs/default.yaml` 会 include `configs/models.yaml` 和 `configs/node_labels.yaml`。默认配置会读取 `C-HyperMem/.env` 中的环境变量。
+
+创建 `.env`，示例：
 
 ```powershell
-CHYPERMEM_LLM_MODEL=...
-CHYPERMEM_LLM_BASE_URL=...
-CHYPERMEM_LLM_API_KEY=...
-CHYPERMEM_EMBEDDING_MODEL=...
-CHYPERMEM_EMBEDDING_BASE_URL=...
-CHYPERMEM_EMBEDDING_API_KEY=...
+CHYPERMEM_LLM_MODEL=your-chat-model
+CHYPERMEM_LLM_BASE_URL=https://your-openai-compatible-endpoint/v1
+CHYPERMEM_LLM_API_KEY=your-api-key
+
+CHYPERMEM_EMBEDDING_MODEL=your-embedding-model
+CHYPERMEM_EMBEDDING_BASE_URL=https://your-openai-compatible-endpoint/v1
+CHYPERMEM_EMBEDDING_API_KEY=your-api-key
 ```
 
-## Git 后续提交操作流程
+LLM 和 embedding 客户端都使用 OpenAI-compatible API。默认 SQLite 主存储路径是 `runs/c_hypermem/memory.sqlite3`，本地嵌入式 Qdrant 向量索引路径是 `runs/c_hypermem/vector_index`。
 
-假设你的本地仓库已经和远程仓库关联好了（即 `origin/main` 已经设置）。
+## 基础使用
 
-```powershell
-git status  # 看哪些文件被修改了、哪些文件还没被 Git 跟踪。
-git add .  # 添加所有修改的文件
-git commit -m "简短清晰的提交说明"  # 交说明最好说明“做了什么改动”
-git push origin main  # 推送到仓库
+```python
+from c_hypermem import Memory
+
+memory = Memory.from_config("configs/default.yaml")
+
+namespace = "demo_user"
+memory.reset(namespace)
+
+memory.add_memory(
+    user_input="I prefer morning interviews and I live in San Francisco.",
+    assistant_output="Got it, I will remember that.",
+    namespace=namespace,
+    metadata={"session_id": "demo-session"},
+)
+
+results = memory.search(
+    "Where does the user live and when do they prefer interviews?",
+    namespace=namespace,
+    top_k=5,
+)
+
+for item in results:
+    print(item["content"])
+
+memory.close()
 ```
 
-如果多人协作，先拉取远程更新再推送：
+`add_memory(...)` 是推荐的 Agent 写入入口。它支持 user/assistant 消息，也支持可选的 `tool_calls`、`tool_results`、`observations`、`attachments`、`trace` 和 metadata。同一次 `add_memory(...)` 中的 user/assistant 消息共享同一个 `turn_id`。
 
-```powershell
-git pull origin main --rebase  # `--rebase` 可以避免多余的合并提交，让历史更干净。
-git push origin main  # 推送到仓库
+`add(...)` 是更低层的导入接口。传入字符串时会作为一条 user message 写入；传入 message dict 列表时会按顺序逐条导入。
+
+## 检索结果
+
+`search(...)` 返回可 JSON 序列化的字典列表。每条结果以一个 `HyperEdge` 为中心：
+
+```python
+{
+    "id": "edge:...",
+    "content": "memory1：...\nUser -prefers- morning interviews",
+    "score": 0.03,
+    "metadata": {
+        "edge_id": "edge:...",
+        "edge_description": "...",
+        "edge_nodes": [...],
+        "periphery_edges": [...],
+        "score_parts": {...},
+    },
+}
+```
+
+`content` 可以直接放进下游 reader prompt。`metadata.edge_nodes` 会包含成员节点及其 active local triples；如果核心边属于某个 `EdgeCluster`，结果还会按配置带出有限数量的 sibling edges 和 periphery nodes。
+
+## 常用配置
+
+- `ingestion.pass_recent_context`：是否把最近 turn 作为抽取上下文传入，当前默认配置为 `false`。
+- `retrieval.query_analysis`：可设为 `false`、`"llm"` 或 `"nlp"`，默认是 `false`。
+- `node_labels.yaml`：定义 `entity`、`fact`、`state`、`preference`、`task`、`event`、`instruction` 等标签的抽取偏好。
+- `maintenance.local_triples.enabled`：控制同 subject/predicate 的 triple 语义维护。若出现同 S/P 多值候选且没有维护 LLM，写入会显式失败，不做规则兜底。
+- `edge_clusters.enabled`：控制是否构建由共享成员节点和 eligible local-triple anchors 形成的确定性 cluster context。
+
+## 自定义抽取器
+
+如果希望完全控制抽取结果，可以传入自定义 extractor。extractor 只需要返回 `MemoryExtraction`，后续 ID 生成、来源追踪、维护、存储和索引仍由 C-HyperMem 负责。
+
+```python
+from c_hypermem import Memory
+from c_hypermem.schema import MemoryExtraction
+
+
+class StaticExtractor:
+    def extract(self, window, context):
+        return MemoryExtraction.model_validate(
+            {
+                "edge_summaries": [
+                    {"ref": "e1", "description": "User profile preferences."}
+                ],
+                "nodes": [
+                    {
+                        "ref": "n1",
+                        "labels": ["entity", "preference"],
+                        "canonical_text": "User",
+                        "summaries": ["The user prefers morning interviews."],
+                        "triples": [
+                            {
+                                "subject": "User",
+                                "predicate": "prefers",
+                                "object": "morning interviews",
+                            }
+                        ],
+                        "edge_summary_refs": ["e1"],
+                    }
+                ],
+            }
+        )
+
+
+memory = Memory.from_config(
+    {
+        "storage": {"path": "runs/demo/memory.sqlite3"},
+        "index": {"use_embedding": False},
+    },
+    extractor=StaticExtractor(),
+)
 ```

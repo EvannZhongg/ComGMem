@@ -1,8 +1,8 @@
 llm:
   provider: openai_compatible
-  model: ${CHYPERMEM_LLM_MODEL2}
-  base_url: ${CHYPERMEM_LLM_BASE_URL2}
-  api_key: ${CHYPERMEM_LLM_API_KEY2}
+  model: ${CHYPERMEM_LLM_MODEL}
+  base_url: ${CHYPERMEM_LLM_BASE_URL}
+  api_key: ${CHYPERMEM_LLM_API_KEY}
   retry_attempts: 5
   retry_backoff_base_sec: 2
   retry_backoff_max_sec: 60
