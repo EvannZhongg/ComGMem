@@ -170,11 +170,7 @@ class GraphMaintenance:
         prompt = self._render_local_triple_merge_prompt(node, tasks, context)
         payload = self.llm.generate_json(prompt)  # type: ignore[union-attr]
         decisions = _parse_local_triple_merge_decisions(payload)
-        if len(decisions) != len(tasks):
-            raise RuntimeError(
-                f"Local triple maintenance expected {len(tasks)} decisions but received {len(decisions)}."
-            )
-        return decisions
+        return _align_local_triple_merge_decisions(tasks, decisions)
 
     def _apply_local_triple_decision(
         self,
@@ -185,6 +181,17 @@ class GraphMaintenance:
         context: AssemblyContext,
     ) -> list[LocalTriple]:
         candidate_by_ref = {f"existing:{index}": triple for index, triple in enumerate(candidates)}
+        unknown_refs = [ref for ref in decision.affected_existing_refs if ref not in candidate_by_ref]
+        if unknown_refs:
+            raise RuntimeError(
+                "Local triple maintenance decision "
+                f"{decision.incoming_ref!r} referenced unknown existing refs: {', '.join(unknown_refs)}."
+            )
+        if decision.decision in {"keep_existing", "keep_new", "merge"} and not decision.affected_existing_refs:
+            raise RuntimeError(
+                "Local triple maintenance decision "
+                f"{decision.incoming_ref!r} with action {decision.decision!r} requires affected_existing_refs."
+            )
         affected = [candidate_by_ref[ref] for ref in decision.affected_existing_refs if ref in candidate_by_ref]
 
         if decision.decision == "keep_existing":
@@ -267,7 +274,8 @@ class GraphMaintenance:
             "{{LOCAL_TRIPLE_CONFLICTS}}": _compact_json(conflicts),
             "{{STRICT_JSON_SHAPE}}": (
                 'Return exactly one JSON object with a decisions array containing one decision object per conflict, '
-                'in the same order: {"decisions":[{"decision":"keep_existing|keep_new|keep_both|merge|needs_review",'
+                'matched by incoming_ref: {"decisions":[{"incoming_ref":"incoming:0",'
+                '"decision":"keep_existing|keep_new|keep_both|merge|needs_review",'
                 '"affected_existing_refs":["existing:0"],'
                 '"merged_triple":{"subject":"...","predicate":"...","object":"...","qualifiers":{}},'
                 '"rationale":"Brief reason."}]}. Use null for merged_triple unless decision is merge.'
@@ -555,6 +563,7 @@ class MergedTriplePayload(BaseModel):
 class LocalTripleMergeDecision(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    incoming_ref: str
     decision: Literal["keep_existing", "keep_new", "keep_both", "merge", "needs_review"]
     affected_existing_refs: list[str] = Field(default_factory=list)
     merged_triple: MergedTriplePayload | None = None
@@ -569,6 +578,42 @@ class LocalTripleMergeBatchResult(BaseModel):
 
 def _parse_local_triple_merge_decisions(payload: Any) -> list["LocalTripleMergeDecision"]:
     return LocalTripleMergeBatchResult.model_validate(payload).decisions
+
+
+def _align_local_triple_merge_decisions(
+    tasks: list[LocalTripleMergeTask],
+    decisions: list[LocalTripleMergeDecision],
+) -> list[LocalTripleMergeDecision]:
+    expected_refs = [task.incoming_ref for task in tasks]
+    expected_ref_set = set(expected_refs)
+    decisions_by_ref: dict[str, LocalTripleMergeDecision] = {}
+    duplicate_refs: list[str] = []
+    for decision in decisions:
+        if decision.incoming_ref in decisions_by_ref:
+            duplicate_refs.append(decision.incoming_ref)
+            continue
+        decisions_by_ref[decision.incoming_ref] = decision
+
+    if duplicate_refs:
+        raise RuntimeError(
+            "Local triple maintenance received duplicate incoming_ref decisions: "
+            f"{', '.join(sorted(set(duplicate_refs)))}."
+        )
+
+    received_ref_set = set(decisions_by_ref)
+    missing_refs = [ref for ref in expected_refs if ref not in received_ref_set]
+    unknown_refs = sorted(received_ref_set - expected_ref_set)
+    if missing_refs or unknown_refs:
+        details = []
+        if missing_refs:
+            details.append(f"missing incoming_ref decisions: {', '.join(missing_refs)}")
+        if unknown_refs:
+            details.append(f"unknown incoming_ref decisions: {', '.join(unknown_refs)}")
+        raise RuntimeError(
+            "Local triple maintenance decision refs did not match conflicts; " + "; ".join(details) + "."
+        )
+
+    return [decisions_by_ref[ref] for ref in expected_refs]
 
 
 class TokenCounter:

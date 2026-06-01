@@ -916,6 +916,7 @@ def test_local_triple_maintenance_keep_new_retires_existing_triple_and_reindexes
             {
                 "decisions": [
                     {
+                        "incoming_ref": "incoming:0",
                         "decision": "keep_new",
                         "affected_existing_refs": ["existing:0"],
                         "merged_triple": None,
@@ -986,6 +987,7 @@ def test_local_triple_maintenance_keep_existing_reindexes_active_graph_without_i
             {
                 "decisions": [
                     {
+                        "incoming_ref": "incoming:0",
                         "decision": "keep_existing",
                         "affected_existing_refs": ["existing:0"],
                         "merged_triple": None,
@@ -1085,6 +1087,7 @@ def test_local_triple_maintenance_routes_same_turn_initial_node_conflicts(tmp_pa
             {
                 "decisions": [
                     {
+                        "incoming_ref": "incoming:1",
                         "decision": "keep_both",
                         "affected_existing_refs": [],
                         "merged_triple": None,
@@ -1133,6 +1136,7 @@ def test_local_triple_maintenance_same_turn_merge_dedupes_turn_id(tmp_path):
             {
                 "decisions": [
                     {
+                        "incoming_ref": "incoming:1",
                         "decision": "merge",
                         "affected_existing_refs": ["existing:0"],
                         "merged_triple": {
@@ -1210,6 +1214,7 @@ def test_local_triple_maintenance_keep_both_preserves_compatible_values(tmp_path
             {
                 "decisions": [
                     {
+                        "incoming_ref": "incoming:0",
                         "decision": "keep_both",
                         "affected_existing_refs": [],
                         "merged_triple": None,
@@ -1259,6 +1264,7 @@ def test_local_triple_maintenance_accepts_decisions_object_response(tmp_path):
             {
                 "decisions": [
                     {
+                        "incoming_ref": "incoming:0",
                         "decision": "keep_both",
                         "affected_existing_refs": [],
                         "merged_triple": None,
@@ -1304,6 +1310,7 @@ def test_local_triple_maintenance_merge_replaces_candidates_with_merged_triple(t
             {
                 "decisions": [
                     {
+                        "incoming_ref": "incoming:0",
                         "decision": "merge",
                         "affected_existing_refs": ["existing:0"],
                         "merged_triple": {
@@ -1366,16 +1373,18 @@ def test_local_triple_maintenance_batches_multiple_conflicts_for_same_node(tmp_p
             {
                 "decisions": [
                     {
-                        "decision": "keep_new",
-                        "affected_existing_refs": ["existing:0"],
-                        "merged_triple": None,
-                        "rationale": "The new city replaces the older residence.",
-                    },
-                    {
+                        "incoming_ref": "incoming:1",
                         "decision": "keep_both",
                         "affected_existing_refs": [],
                         "merged_triple": None,
                         "rationale": "Both preferences can coexist.",
+                    },
+                    {
+                        "incoming_ref": "incoming:0",
+                        "decision": "keep_new",
+                        "affected_existing_refs": ["existing:0"],
+                        "merged_triple": None,
+                        "rationale": "The new city replaces the older residence.",
                     },
                 ]
             }
@@ -1412,7 +1421,8 @@ def test_local_triple_maintenance_batches_multiple_conflicts_for_same_node(tmp_p
     memory.close()
 
     assert maintenance_llm.call_count == 1
-    assert maintenance_llm.prompts[0].count('"incoming_ref"') == 2
+    assert '"incoming_ref":"incoming:0"' in maintenance_llm.prompts[0]
+    assert '"incoming_ref":"incoming:1"' in maintenance_llm.prompts[0]
     assert '"predicate":"lives_in"' in maintenance_llm.prompts[0]
     assert '"object":"San Francisco"' in maintenance_llm.prompts[0]
     assert '"predicate":"likes"' in maintenance_llm.prompts[0]
@@ -1430,6 +1440,129 @@ def test_local_triple_maintenance_batches_multiple_conflicts_for_same_node(tmp_p
     assert distribution["retired"] == 1
     assert distribution["active_by_predicate"] == {"likes": 2, "lives_in": 1}
     assert distribution["active_by_subject_predicate"] == {"alice|likes": 2, "alice|lives_in": 1}
+
+
+def test_local_triple_maintenance_rejects_unmatched_incoming_refs(tmp_path):
+    maintenance_llm = MaintenanceLLM(
+        [
+            {
+                "decisions": [
+                    {
+                        "incoming_ref": "incoming:1",
+                        "decision": "keep_both",
+                        "affected_existing_refs": [],
+                        "merged_triple": None,
+                        "rationale": "Mismatched ref should fail.",
+                    }
+                ]
+            }
+        ]
+    )
+    memory = Memory.from_config(
+        {"storage": {"path": str(tmp_path / "memory.sqlite3")}},
+        extractor=SequenceHomogeneousExtractor(
+            [
+                _single_entity_payload(
+                    "Alice likes tea.",
+                    triples=[{"subject": "Alice", "predicate": "likes", "object": "tea"}],
+                ),
+                _single_entity_payload(
+                    "Alice likes coffee.",
+                    triples=[{"subject": "Alice", "predicate": "likes", "object": "coffee"}],
+                ),
+            ]
+        ),
+        maintenance_llm=maintenance_llm,
+    )
+    namespace = "local_triple_unmatched_incoming_ref_ns"
+    memory.reset(namespace)
+
+    memory.add_memory("I like tea.", namespace=namespace)
+    with pytest.raises(RuntimeError, match="decision refs did not match conflicts"):
+        memory.add_memory("I like coffee.", namespace=namespace)
+    memory.close()
+
+
+def test_local_triple_maintenance_rejects_unknown_existing_refs(tmp_path):
+    maintenance_llm = MaintenanceLLM(
+        [
+            {
+                "decisions": [
+                    {
+                        "incoming_ref": "incoming:0",
+                        "decision": "keep_new",
+                        "affected_existing_refs": ["existing:99"],
+                        "merged_triple": None,
+                        "rationale": "Unknown candidate ref should fail.",
+                    }
+                ]
+            }
+        ]
+    )
+    memory = Memory.from_config(
+        {"storage": {"path": str(tmp_path / "memory.sqlite3")}},
+        extractor=SequenceHomogeneousExtractor(
+            [
+                _single_entity_payload(
+                    "Alice lives in California.",
+                    triples=[{"subject": "Alice", "predicate": "lives_in", "object": "California"}],
+                ),
+                _single_entity_payload(
+                    "Alice lives in San Francisco.",
+                    triples=[{"subject": "Alice", "predicate": "lives_in", "object": "San Francisco"}],
+                ),
+            ]
+        ),
+        maintenance_llm=maintenance_llm,
+    )
+    namespace = "local_triple_unknown_existing_ref_ns"
+    memory.reset(namespace)
+
+    memory.add_memory("I live in California.", namespace=namespace)
+    with pytest.raises(RuntimeError, match="unknown existing refs"):
+        memory.add_memory("I live in San Francisco.", namespace=namespace)
+    memory.close()
+
+
+def test_local_triple_maintenance_requires_affected_refs_for_replacement_decisions(tmp_path):
+    maintenance_llm = MaintenanceLLM(
+        [
+            {
+                "decisions": [
+                    {
+                        "incoming_ref": "incoming:0",
+                        "decision": "keep_new",
+                        "affected_existing_refs": [],
+                        "merged_triple": None,
+                        "rationale": "Replacement decisions must identify affected candidates.",
+                    }
+                ]
+            }
+        ]
+    )
+    memory = Memory.from_config(
+        {"storage": {"path": str(tmp_path / "memory.sqlite3")}},
+        extractor=SequenceHomogeneousExtractor(
+            [
+                _single_entity_payload(
+                    "Alice lives in California.",
+                    triples=[{"subject": "Alice", "predicate": "lives_in", "object": "California"}],
+                ),
+                _single_entity_payload(
+                    "Alice lives in San Francisco.",
+                    triples=[{"subject": "Alice", "predicate": "lives_in", "object": "San Francisco"}],
+                ),
+            ]
+        ),
+        maintenance_llm=maintenance_llm,
+    )
+    namespace = "local_triple_requires_affected_refs_ns"
+    memory.reset(namespace)
+
+    memory.add_memory("I live in California.", namespace=namespace)
+    with pytest.raises(RuntimeError, match="requires affected_existing_refs"):
+        memory.add_memory("I live in San Francisco.", namespace=namespace)
+    memory.close()
 
 
 def test_local_triple_maintenance_requires_llm_for_same_subject_predicate(tmp_path):

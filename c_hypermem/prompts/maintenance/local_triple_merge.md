@@ -1,6 +1,6 @@
 ---
 id: maintenance.local_triple_merge
-version: 0.1.2
+version: 0.2.0
 owner: c_hypermem
 stage: local_triple_sp_overlap_batch
 ---
@@ -35,9 +35,10 @@ triple.
 - Do not output system IDs, source references, storage keys, graph structures,
   scores, confidence, or chain-of-thought.
 - Return exactly one JSON object with a `decisions` array containing one
-  decision object per conflict, in the same order as the provided conflict
-  array.
-- Use only caller-provided refs such as `existing:0`.
+  decision object per conflict.
+- Copy each conflict's `incoming_ref` into the matching decision object.
+- Use only caller-provided refs such as `incoming:0` and `existing:0`.
+- Do not invent, omit, or duplicate `incoming_ref` values.
 - For `keep_existing`, `keep_new`, and `merge`, include the affected existing
   refs.
 - For `merge`, provide a complete `merged_triple` object.

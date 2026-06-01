@@ -94,6 +94,7 @@ Memory.add_memory/add
 - 新 node 初始化和已有 node merge 都会经过同一个 local triple 维护入口。
 - normalized SPO 完全相同的 triple 不触发 LLM，只合并系统来源。
 - normalized subject/predicate 相同但 object 不同的候选会批量调用 `maintenance/local_triple_merge.md`。
+- maintenance 决策必须携带对应 conflict 的 `incoming_ref`，系统按 ref 对齐决策，不依赖数组顺序。
 - LLM 决策仅允许 `keep_existing/keep_new/keep_both/merge/needs_review`。
 - 系统根据决策追加、退役、合并或标记 uncertain triples，并维护 `source_turn_ids/source_triple_ids/maintenance_*` qualifiers。
 - `node.metadata.maintenance.local_triples.triple_distribution` 保存 active/status/predicate 分布等派生统计。
