@@ -226,11 +226,59 @@ def test_llm_memory_extractor_prompt_and_parser_use_nodes_and_edge_summaries():
     assert '"entities", "events", "assertions"' not in llm.prompts[0]
 
 
+def test_llm_memory_extractor_retries_invalid_extraction_payload():
+    invalid_payload = {
+        "edge_summaries": [{"ref": "e1", "description": "Alice's scheduling preference."}],
+        "nodes": [
+            {
+                "ref": "n1",
+                "labels": ["preference"],
+                "canonical_text": "Alice prefers morning interviews.",
+                "summaries": ["Alice prefers morning interviews."],
+                "triples": [{"subject": "Alice", "predicate": "prefers", "object": "morning interviews"}],
+                "edge_summary_refs": ["e2"],
+            }
+        ],
+    }
+    valid_payload = {
+        "edge_summaries": [{"ref": "e1", "description": "Alice's scheduling preference."}],
+        "nodes": [
+            {
+                "ref": "n1",
+                "labels": ["preference"],
+                "canonical_text": "Alice prefers morning interviews.",
+                "summaries": ["Alice prefers morning interviews."],
+                "triples": [{"subject": "Alice", "predicate": "prefers", "object": "morning interviews"}],
+                "edge_summary_refs": ["e1"],
+            }
+        ],
+    }
+    config = MemoryConfig.load(
+        {
+            "llm": {
+                "provider": "openai_compatible",
+                "model": "test-model",
+                "retry_attempts": 2,
+            }
+        }
+    )
+    llm = RecordingLLM([invalid_payload, valid_payload])
+    extractor = LLMMemoryExtractor(config, llm=llm)
+    window = ExtractionWindow(target=[Message(role="user", content="I prefer morning interviews.")], context=[])
+
+    extraction = extractor.extract(window, ExtractionContext(namespace="test", metadata={}, current_turn=0))
+
+    assert extraction.nodes[0].edge_summary_refs == ["e1"]
+    assert len(llm.prompts) == 2
+
+
 class RecordingLLM:
     def __init__(self, payload):
-        self.payload = payload
+        self.payloads = payload if isinstance(payload, list) else [payload]
         self.prompts = []
 
     def generate_json(self, prompt):
         self.prompts.append(prompt)
-        return self.payload
+        if not self.payloads:
+            raise AssertionError("Unexpected LLM call")
+        return self.payloads.pop(0)

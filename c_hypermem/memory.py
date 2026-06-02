@@ -87,6 +87,7 @@ class Memory:
             recall_config=config.recall,
             nlp_config=config.nlp,
             query_analysis_llm=query_analysis_llm,
+            query_analysis_llm_config=config.llm if query_analysis_llm is not None else None,
             embedding_client=self.embedding_client,
             vector_stores=self.vector_stores,
         )

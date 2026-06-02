@@ -6,9 +6,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
-from c_hypermem.config import NLPConfig, RetrievalConfig
+from c_hypermem.config import ModelConfig, NLPConfig, RetrievalConfig
 from c_hypermem.errors import ConfigError
 from c_hypermem.llms.base import LLMClient
+from c_hypermem.llms.retrying import generate_json_with_parse_retries
 from c_hypermem.utils.prompts import PromptRegistry
 from c_hypermem.utils.text import normalize_text
 
@@ -45,6 +46,7 @@ def build_query_analyzer(
     *,
     nlp_config: NLPConfig | None = None,
     llm: LLMClient | None = None,
+    llm_config: ModelConfig | None = None,
     prompt_registry: PromptRegistry | None = None,
 ) -> QueryAnalyzer:
     if config.query_analysis is False:
@@ -54,7 +56,7 @@ def build_query_analyzer(
     if config.query_analysis == "llm":
         if llm is None:
             raise ConfigError("retrieval.query_analysis='llm' requires an LLM client or config.llm.")
-        return LLMQueryAnalyzer(llm=llm, prompt_registry=prompt_registry)
+        return LLMQueryAnalyzer(llm=llm, llm_config=llm_config, prompt_registry=prompt_registry)
     raise ConfigError(f"Unsupported retrieval.query_analysis mode: {config.query_analysis!r}")
 
 
@@ -68,15 +70,21 @@ class LLMQueryAnalyzer:
         self,
         *,
         llm: LLMClient,
+        llm_config: ModelConfig | None = None,
         prompt_registry: PromptRegistry | None = None,
     ) -> None:
         self.llm = llm
+        self.llm_config = llm_config
         self.prompt_registry = prompt_registry or PromptRegistry()
 
     def analyze(self, query: str) -> QueryAnalysis:
         prompt = self._render_prompt(query)
-        payload = self.llm.generate_json(prompt)
-        return _analysis_from_payload(query, "llm", payload)
+        return generate_json_with_parse_retries(
+            self.llm,
+            prompt,
+            lambda payload: _analysis_from_payload(query, "llm", payload),
+            config=self.llm_config,
+        )
 
     def _render_prompt(self, query: str) -> str:
         prompt = self.prompt_registry.load("retrieval.query_analysis")
@@ -162,6 +170,8 @@ def _resolve_model_path(model_path: str) -> str:
 
 
 def _analysis_from_payload(query: str, mode: str, payload: dict[str, Any]) -> QueryAnalysis:
+    if not isinstance(payload, dict):
+        raise ValueError("Query analysis payload must be a JSON object.")
     data = dict(payload or {})
     return QueryAnalysis(
         query=query,

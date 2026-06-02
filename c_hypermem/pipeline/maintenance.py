@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from c_hypermem.config import MemoryConfig
 from c_hypermem.errors import ConfigError
 from c_hypermem.llms.base import LLMClient
+from c_hypermem.llms.retrying import generate_json_with_parse_retries
 from c_hypermem.pipeline.context import AssemblyContext
 from c_hypermem.pipeline.graph_utils import (
     dedupe_labels,
@@ -168,9 +169,15 @@ class GraphMaintenance:
         context: AssemblyContext,
     ) -> list["LocalTripleMergeDecision"]:
         prompt = self._render_local_triple_merge_prompt(node, tasks, context)
-        payload = self.llm.generate_json(prompt)  # type: ignore[union-attr]
-        decisions = _parse_local_triple_merge_decisions(payload)
-        return _align_local_triple_merge_decisions(tasks, decisions)
+        return generate_json_with_parse_retries(
+            self.llm,  # type: ignore[arg-type]
+            prompt,
+            lambda payload: _align_local_triple_merge_decisions(
+                tasks,
+                _parse_local_triple_merge_decisions(payload),
+            ),
+            config=self.config.llm,
+        )
 
     def _apply_local_triple_decision(
         self,
@@ -445,12 +452,13 @@ class GraphMaintenance:
         if self.llm is None:
             raise RuntimeError("Node summary maintenance reached a compaction trigger and requires an LLM.")
         prompt = self._render_summary_compaction_prompt(node, trigger, context)
-        payload = self.llm.generate_json(prompt)
-        result = NodeSummaryCompactionResult.model_validate(payload)
-        summary = result.summary.strip()
-        if not summary:
-            raise RuntimeError("Node summary maintenance LLM returned an empty summary.")
-        return summary
+        result = generate_json_with_parse_retries(
+            self.llm,
+            prompt,
+            _parse_node_summary_compaction_result,
+            config=self.config.llm,
+        )
+        return result.summary.strip()
 
     def _compact_edge_description(
         self,
@@ -462,12 +470,13 @@ class GraphMaintenance:
         if self.llm is None:
             raise RuntimeError("HyperEdge description maintenance reached a compaction trigger and requires an LLM.")
         prompt = self._render_edge_description_compaction_prompt(edge, trigger, context)
-        payload = self.llm.generate_json(prompt)
-        result = HyperEdgeDescriptionCompactionResult.model_validate(payload)
-        description = result.description.strip()
-        if not description:
-            raise RuntimeError("HyperEdge description maintenance LLM returned an empty description.")
-        return description
+        result = generate_json_with_parse_retries(
+            self.llm,
+            prompt,
+            _parse_hyper_edge_description_compaction_result,
+            config=self.config.llm,
+        )
+        return result.description.strip()
 
     def _render_summary_compaction_prompt(
         self,
@@ -578,6 +587,20 @@ class LocalTripleMergeBatchResult(BaseModel):
 
 def _parse_local_triple_merge_decisions(payload: Any) -> list["LocalTripleMergeDecision"]:
     return LocalTripleMergeBatchResult.model_validate(payload).decisions
+
+
+def _parse_node_summary_compaction_result(payload: Any) -> NodeSummaryCompactionResult:
+    result = NodeSummaryCompactionResult.model_validate(payload)
+    if not result.summary.strip():
+        raise RuntimeError("Node summary maintenance LLM returned an empty summary.")
+    return result
+
+
+def _parse_hyper_edge_description_compaction_result(payload: Any) -> HyperEdgeDescriptionCompactionResult:
+    result = HyperEdgeDescriptionCompactionResult.model_validate(payload)
+    if not result.description.strip():
+        raise RuntimeError("HyperEdge description maintenance LLM returned an empty description.")
+    return result
 
 
 def _align_local_triple_merge_decisions(

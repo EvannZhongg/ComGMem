@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from c_hypermem.config import NLPConfig, RecallConfig, RetrievalConfig
+from c_hypermem.config import ModelConfig, NLPConfig, RecallConfig, RetrievalConfig
 from c_hypermem.embeddings import EmbeddingClient
 from c_hypermem.llms.base import LLMClient
 from c_hypermem.retrieval.fusion import FusedNode, RankedNodeList, reciprocal_rank_fusion_channels
@@ -33,13 +33,19 @@ class Retriever:
         recall_config: RecallConfig | None = None,
         nlp_config: NLPConfig | None = None,
         query_analysis_llm: LLMClient | None = None,
+        query_analysis_llm_config: ModelConfig | None = None,
         embedding_client: EmbeddingClient | None = None,
         vector_stores: dict[str, VectorStore] | None = None,
     ) -> None:
         self.store = store
         self.config = config
         self.recall_config = recall_config or RecallConfig()
-        self.analyzer = build_query_analyzer(config, nlp_config=nlp_config, llm=query_analysis_llm)
+        self.analyzer = build_query_analyzer(
+            config,
+            nlp_config=nlp_config,
+            llm=query_analysis_llm,
+            llm_config=query_analysis_llm_config,
+        )
         self.lexical_recall = SQLiteFTSRecall(store, config)
         self.vector_recall = DenseVectorRecall(
             store,

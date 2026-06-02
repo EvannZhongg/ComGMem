@@ -6,6 +6,7 @@ from typing import Any, Protocol
 from c_hypermem.config import MemoryConfig
 from c_hypermem.llms.base import LLMClient
 from c_hypermem.llms.openai_compatible import OpenAICompatibleLLM
+from c_hypermem.llms.retrying import generate_json_with_parse_retries
 from c_hypermem.schema import MemoryExtraction, Message
 from c_hypermem.utils.prompts import PromptRegistry
 from c_hypermem.utils.text import truncate
@@ -48,8 +49,12 @@ class LLMMemoryExtractor:
 
     def extract(self, window: ExtractionWindow, context: ExtractionContext) -> MemoryExtraction:
         prompt = self._render_prompt(window, context)
-        payload = self.llm.generate_json(prompt)
-        return normalize_extraction_payload(payload)
+        return generate_json_with_parse_retries(
+            self.llm,
+            prompt,
+            normalize_extraction_payload,
+            config=self.config.llm,
+        )
 
     def _render_prompt(self, window: ExtractionWindow, context: ExtractionContext) -> str:
         prompt_id = _prompt_id_from_path(self.config.extraction.prompt)

@@ -821,6 +821,43 @@ def test_node_summary_maintenance_compacts_at_k_sources(tmp_path):
     assert summary_state["last_compaction_trigger"]["reasons"] == ["source_count"]
 
 
+def test_node_summary_maintenance_retries_invalid_compaction_payload(tmp_path):
+    maintenance_llm = MaintenanceLLM([{"description": "wrong field"}, {"summary": "Alice compact summary."}])
+    memory = Memory.from_config(
+        {
+            "storage": {"path": str(tmp_path / "memory.sqlite3")},
+            "llm": {
+                "provider": "openai_compatible",
+                "model": "test-model",
+                "retry_attempts": 2,
+            },
+            "maintenance": {
+                "node_summary": {
+                    "compact_after_k_sources": 2,
+                    "max_tokens": 1000,
+                }
+            },
+        },
+        extractor=SequenceHomogeneousExtractor(
+            [
+                _single_entity_payload("Alice is the user."),
+                _single_entity_payload("Alice is preparing for interviews."),
+            ]
+        ),
+        maintenance_llm=maintenance_llm,
+    )
+    namespace = "node_summary_retry_invalid_payload_ns"
+    memory.reset(namespace)
+
+    memory.add_memory("I am Alice.", namespace=namespace)
+    memory.add_memory("I am preparing for interviews.", namespace=namespace)
+    node = memory.store.list_nodes(namespace)[0]
+    memory.close()
+
+    assert node.summary == "Alice compact summary."
+    assert maintenance_llm.call_count == 2
+
+
 def test_node_summary_maintenance_compacts_at_token_limit_before_k(tmp_path):
     maintenance_llm = MaintenanceLLM([{"summary": "Alice interview preference."}])
     memory = Memory.from_config(
@@ -979,6 +1016,71 @@ def test_local_triple_maintenance_keep_new_retires_existing_triple_and_reindexes
     ]
     assert graph_records[-1].text.endswith("- Alice lives_in San Francisco")
     assert "California" not in graph_records[-1].text
+
+
+def test_local_triple_maintenance_retries_invalid_decision_refs(tmp_path):
+    maintenance_llm = MaintenanceLLM(
+        [
+            {
+                "decisions": [
+                    {
+                        "incoming_ref": "incoming:1",
+                        "decision": "keep_new",
+                        "affected_existing_refs": ["existing:0"],
+                        "merged_triple": None,
+                        "rationale": "Wrong incoming ref.",
+                    }
+                ]
+            },
+            {
+                "decisions": [
+                    {
+                        "incoming_ref": "incoming:0",
+                        "decision": "keep_new",
+                        "affected_existing_refs": ["existing:0"],
+                        "merged_triple": None,
+                        "rationale": "The new location replaces the old location.",
+                    }
+                ]
+            },
+        ]
+    )
+    memory = Memory.from_config(
+        {
+            "storage": {"path": str(tmp_path / "memory.sqlite3")},
+            "llm": {
+                "provider": "openai_compatible",
+                "model": "test-model",
+                "retry_attempts": 2,
+            },
+        },
+        extractor=SequenceHomogeneousExtractor(
+            [
+                _single_entity_payload(
+                    "Alice lives in California.",
+                    triples=[{"subject": "Alice", "predicate": "lives_in", "object": "California"}],
+                ),
+                _single_entity_payload(
+                    "Alice lives in San Francisco.",
+                    triples=[{"subject": "Alice", "predicate": "lives_in", "object": "San Francisco"}],
+                ),
+            ]
+        ),
+        maintenance_llm=maintenance_llm,
+    )
+    namespace = "local_triple_retry_invalid_refs_ns"
+    memory.reset(namespace)
+
+    memory.add_memory("I live in California.", namespace=namespace)
+    memory.add_memory("I live in San Francisco.", namespace=namespace)
+    node = memory.store.list_nodes(namespace)[0]
+    memory.close()
+
+    assert [(triple.object, triple.status) for triple in node.local_graph.triples] == [
+        ("California", "retired"),
+        ("San Francisco", "active"),
+    ]
+    assert maintenance_llm.call_count == 2
 
 
 def test_local_triple_maintenance_keep_existing_reindexes_active_graph_without_incoming(tmp_path):
@@ -1950,6 +2052,43 @@ def test_hyperedge_description_compacts_at_k_sources(tmp_path):
     assert state["pending_source_turn_ids"] == []
     assert state["compaction_count"] == 1
     assert state["last_compaction_trigger"]["reasons"] == ["source_count"]
+
+
+def test_hyperedge_description_retries_invalid_compaction_payload(tmp_path):
+    maintenance_llm = MaintenanceLLM([{"summary": "wrong field"}, {"description": "Alice compact edge."}])
+    memory = Memory.from_config(
+        {
+            "storage": {"path": str(tmp_path / "memory.sqlite3")},
+            "llm": {
+                "provider": "openai_compatible",
+                "model": "test-model",
+                "retry_attempts": 2,
+            },
+            "maintenance": {
+                "hyper_edge_description": {
+                    "compact_after_k_sources": 2,
+                    "max_tokens": 1000,
+                }
+            },
+        },
+        extractor=SequenceHomogeneousExtractor(
+            [
+                _single_entity_payload("Alice is the user.", edge_description="Alice identity."),
+                _single_entity_payload("Alice is preparing for interviews.", edge_description="Alice interview context."),
+            ]
+        ),
+        maintenance_llm=maintenance_llm,
+    )
+    namespace = "hyperedge_description_retry_invalid_payload_ns"
+    memory.reset(namespace)
+
+    memory.add_memory("I am Alice.", namespace=namespace)
+    memory.add_memory("I am preparing for interviews.", namespace=namespace)
+    edge = memory.store.list_edges(namespace)[0]
+    memory.close()
+
+    assert maintenance_llm.call_count == 2
+    assert edge.description == "Alice compact edge."
 
 
 class StaticHomogeneousExtractor:
