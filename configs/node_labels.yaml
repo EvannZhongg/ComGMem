@@ -1,7 +1,7 @@
 turn:
   enabled: true
   description: "Raw conversation turns or message spans that preserve source text, speaker role, order, and provenance for later evidence tracing."
-  indexing: {lexical: true, vector: true, time_index: true}
+  indexing: {lexical: true, vector: false, time_index: true}
 
 edge_clusters:
   stop_nodes:

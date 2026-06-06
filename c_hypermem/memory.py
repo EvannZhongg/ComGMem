@@ -57,17 +57,13 @@ class Memory:
         if self.vector_store is not None:
             self.vector_stores["node_local_graph"] = self.vector_store
             if vector_store is not None:
-                for item_type in _VECTOR_INDEX_TYPES:
+                for item_type in _enabled_vector_index_types(config):
                     self.vector_stores[item_type] = vector_store
             elif self.embedding_client is not None and config.index.vector == "qdrant":
-                self.vector_stores.update(
-                    {
-                        "node_content": self._default_qdrant_vector_store("node_content"),
-                        "hyper_edge_description": self._default_qdrant_vector_store("hyper_edge_description"),
-                        "edge_cluster_canonical": self._default_qdrant_vector_store("edge_cluster_canonical"),
-                        "turn_dialogue": self._default_qdrant_vector_store("turn_dialogue"),
-                    }
-                )
+                for item_type in _enabled_vector_index_types(config):
+                    if item_type == "node_local_graph":
+                        continue
+                    self.vector_stores[item_type] = self._default_qdrant_vector_store(item_type)
         self.ingestion = IngestionPipeline(
             config,
             self.store,
@@ -337,6 +333,8 @@ class Memory:
         messages: list[Message],
         metadata: dict[str, Any],
     ) -> None:
+        if not self.config.turn.enabled or not self.config.turn.indexing.vector:
+            return
         item = collect_turn_dialogue_index_item(
             namespace=namespace,
             turn_id=turn_id,
@@ -403,6 +401,13 @@ _VECTOR_INDEX_TYPES = [
     "edge_cluster_canonical",
     "turn_dialogue",
 ]
+
+
+def _enabled_vector_index_types(config: MemoryConfig) -> list[str]:
+    item_types = list(_VECTOR_INDEX_TYPES)
+    if not config.turn.enabled or not config.turn.indexing.vector:
+        item_types.remove("turn_dialogue")
+    return item_types
 
 
 def _vector_collection_name(base_name: str, item_type: str) -> str:

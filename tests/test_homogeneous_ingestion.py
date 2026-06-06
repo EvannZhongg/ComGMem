@@ -1750,6 +1750,7 @@ def test_vector_indexing_uses_node_local_graph_and_hyper_edge_description(tmp_pa
     assert item_types.count("node_content") == 3
     assert item_types.count("node_local_graph") == 3
     assert item_types.count("hyper_edge_description") == 2
+    assert item_types.count("turn_dialogue") == 1
 
     preference = next(node for node in nodes if "preference" in node.node_labels)
     preference_graph_text = node_local_graph_embedding_text(preference)
@@ -1786,6 +1787,34 @@ def test_vector_indexing_uses_node_local_graph_and_hyper_edge_description(tmp_pa
     ]
     assert {record.text for record in edge_records} == edge_descriptions
     assert {record.payload["edge_id"] for record in edge_records} == {edge.edge_id for edge in edges}
+
+
+def test_turn_dialogue_vector_indexing_can_be_disabled(tmp_path):
+    embedding_client = RecordingEmbeddingClient()
+    vector_store = RecordingVectorStore()
+    memory = Memory.from_config(
+        {
+            "storage": {"path": str(tmp_path / "memory.sqlite3")},
+            "turn": {"indexing": {"vector": False}},
+        },
+        extractor=StaticHomogeneousExtractor(),
+        embedding_client=embedding_client,
+        vector_store=vector_store,
+    )
+    namespace = "turn_dialogue_vector_disabled_ns"
+    memory.reset(namespace)
+
+    memory.add_memory(
+        user_input="Alice prefers morning interviews.",
+        assistant_output="I will remember that.",
+        namespace=namespace,
+    )
+    memory.close()
+
+    item_types = [record.payload["item_type"] for record in vector_store.records]
+    assert "turn_dialogue" not in item_types
+    embedded_texts = [text for batch in embedding_client.inputs for text in batch]
+    assert "User: Alice prefers morning interviews.\nAssistant: I will remember that." not in embedded_texts
 
 
 def test_empty_active_local_graph_deletes_stale_node_local_graph_vector(tmp_path):
