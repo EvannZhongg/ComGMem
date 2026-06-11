@@ -1,6 +1,6 @@
-# C-HyperMem
+# ComGMem (C-HyperMem)
 
-C-HyperMem 是一个面向长期对话 Agent 的复合超图记忆包。
+ComGMem 是一个面向长期对话 Agent 的复合超图记忆包。
 
 它把抽取到的长期记忆保存为可复用的 `MemoryNode`，再用 description-only 的 `HyperEdge` 连接相关节点，并通过轻量 `EdgeCluster` 在检索时带出相邻上下文。节点内部的 `LocalTriple` 用来表达紧凑事实；系统负责生成所有 ID、来源追踪、时间、维护元数据和索引。
 
