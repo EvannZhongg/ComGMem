@@ -1,10 +1,10 @@
-# C-HyperMem 当前实现状态
+# ComGMem 当前实现状态
 
 本文档描述当前代码的真实实现。后续修改代码或架构时，需要同步更新本文档；如果本文与较早的设计文档存在冲突，以当前代码和本文为准。
 
 ## 1. 对外入口
 
-- `c_hypermem.Memory` 是推荐入口，支持 `from_config/reset/add/add_memory/search/stats/close`。
+- `comgmem.Memory` 是推荐入口，支持 `from_config/reset/add/add_memory/search/stats/close`。
 - `Memory.from_config(...)` 接受配置文件路径、dict、`MemoryConfig` 或 `None`。
 - `add_memory(...)` 面向 agent 交互，会规范化为 `AgentInteraction`，并把同一次 user/assistant 交互写入同一个 `turn_id`。
 - `add(...)` 面向低层导入，会把字符串或 message dict 列表规范化为 `MemoryImportBatch`，并按消息顺序逐条增量写入。
@@ -13,10 +13,10 @@
 ## 2. 配置与环境
 
 - 默认配置入口为 `configs/default.yaml`，其中 `include` 会合并 `configs/models.yaml` 和 `configs/node_labels.yaml`。
-- `.env` 只从 C-HyperMem 项目根目录读取，用于解析 `CHYPERMEM_LLM_*` 和 `CHYPERMEM_EMBEDDING_*` 环境变量。
+- `.env` 只从 ComGMem 项目根目录读取，用于解析 `COMGMEM_LLM_*` 和 `COMGMEM_EMBEDDING_*` 环境变量。
 - LLM 与 embedding 客户端均使用 OpenAI-compatible API。
-- 默认主存储为 SQLite：`runs/c_hypermem/memory.sqlite3`。
-- 默认向量后端为本地 embedded Qdrant：`runs/c_hypermem/vector_index`。
+- 默认主存储为 SQLite：`runs/comgmem/memory.sqlite3`。
+- 默认向量后端为本地 embedded Qdrant：`runs/comgmem/vector_index`。
 - `ingestion.pass_recent_context` 默认 `false`；开启后由 `ingestion.context_window_messages` 控制最近上下文 turn 数。
 - `maintenance` 当前包含 `node_summary`、`local_triples`、`hyper_edge_description` 三类维护配置。
 - `edge_clusters.enabled` 控制是否构建 EdgeCluster；`edge_clusters.stop_nodes` 来自 `configs/node_labels.yaml`，默认包含 `User` 和 `Assistant`。
@@ -25,7 +25,7 @@
 
 ## 3. Schema
 
-核心 schema 位于 `c_hypermem/schema.py`：
+核心 schema 位于 `comgmem/schema.py`：
 
 - `MemoryNode`：统一记忆节点，使用 `node_labels` 表达语义类型，节点内部可携带 `LocalNodeGraph`。
 - `LocalNodeGraph`：节点内部局部图，目前只包含 `LocalTriple` 列表。
@@ -78,7 +78,7 @@ Memory.add_memory/add
 
 ## 5. 维护
 
-维护逻辑集中在 `c_hypermem/pipeline/maintenance.py`。维护 prompt 只在明确候选或阈值条件下触发；没有维护 LLM 时，语义维护场景会显式失败，不做规则兜底。
+维护逻辑集中在 `comgmem/pipeline/maintenance.py`。维护 prompt 只在明确候选或阈值条件下触发；没有维护 LLM 时，语义维护场景会显式失败，不做规则兜底。
 
 ### Node Summary
 
@@ -150,7 +150,7 @@ SQLite 行为：
 - `turns` 以 message 行保存原始交互，并记录 `inserted_at`，用于检索上下文中的真实插入时间。
 - `Memory.reset(namespace)` 会清理该 namespace 的 SQLite 记录和所有向量 collection 中的点。
 
-向量索引由 `c_hypermem/stores/vector_store.py` 提供：
+向量索引由 `comgmem/stores/vector_store.py` 提供：
 
 - `node_content`：索引 `MemoryNode.content + summary`。
 - `node_local_graph`：按 node 聚合索引 active local triples，每个 node 一个向量点。
@@ -271,7 +271,7 @@ recall:
 常用验证命令：
 
 ```powershell
-python -m compileall -q c_hypermem
+python -m compileall -q comgmem
 python -m pytest -q
 python examples\quickstart.py
 ```

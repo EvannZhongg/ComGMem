@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from c_hypermem.config import ModelConfig
-from c_hypermem.retrieval.query_analysis import LLMQueryAnalyzer
+from comgmem.config import ModelConfig
+from comgmem.retrieval.query_analysis import LLMQueryAnalyzer
 
 
 def test_query_analysis_retries_invalid_payload_shape():

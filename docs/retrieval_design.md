@@ -1,11 +1,11 @@
-# C-HyperMem Retrieval Design
+# ComGMem Retrieval Design
 
-本文档记录 C-HyperMem 检索算法的设计概念和 pipeline 边界。具体代码模块、真实配置、测试覆盖和当前实现进度放在 `current_implementation.md` 中维护；本文只保留检索设计应遵守的结构。
+本文档记录 ComGMem 检索算法的设计概念和 pipeline 边界。具体代码模块、真实配置、测试覆盖和当前实现进度放在 `current_implementation.md` 中维护；本文只保留检索设计应遵守的结构。
 
 当前约束：
 
 - `retrieval.query_analysis: false` 是唯一当前开发目标。
-- 当前 false 链路不使用 `c_hypermem/prompts/retrieval/query_analysis.md`。
+- 当前 false 链路不使用 `comgmem/prompts/retrieval/query_analysis.md`。
 - 当前 false 链路不加载 spaCy。
 - `nlp` / `llm` query analysis 只保留为未来扩展入口；当前不参与默认开发链路。
 - 不做规则化 query 抽取，尤其不从 query 中用规则抽取 entity candidates。

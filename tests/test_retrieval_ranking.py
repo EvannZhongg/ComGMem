@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-from c_hypermem.config import RecallConfig, RetrievalConfig
-from c_hypermem.retrieval.fusion import FusedNode
-from c_hypermem.retrieval.graph_ripple import GraphRippleExpansion, RankedEdge
-from c_hypermem.retrieval.ranking import edge_level_rrf
-from c_hypermem.retrieval.recall import Retriever
-from c_hypermem.schema import EdgeCluster, EdgeClusterMember, HyperEdge, LocalNodeGraph, LocalTriple, MemoryNode
+from comgmem.config import RecallConfig, RetrievalConfig
+from comgmem.retrieval.fusion import FusedNode
+from comgmem.retrieval.graph_ripple import GraphRippleExpansion, RankedEdge
+from comgmem.retrieval.ranking import edge_level_rrf
+from comgmem.retrieval.recall import Retriever
+from comgmem.schema import EdgeCluster, EdgeClusterMember, HyperEdge, LocalNodeGraph, LocalTriple, MemoryNode
 
 
 def test_edge_level_rrf_treats_missing_track_as_zero_and_sums_dual_hits():

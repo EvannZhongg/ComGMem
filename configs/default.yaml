@@ -4,7 +4,7 @@ include:
 
 storage:
   backend: sqlite
-  path: runs/c_hypermem/memory.sqlite3
+  path: runs/comgmem/memory.sqlite3
 
 ingestion:
   pass_recent_context: false
@@ -38,8 +38,8 @@ index:
   use_embedding: true
   vector_store:
     backend: qdrant
-    path: runs/c_hypermem/vector_index
-    collection_name: c_hypermem_memory
+    path: runs/comgmem/vector_index
+    collection_name: comgmem_memory
 
 retrieval:
   # Query analysis modes: false disables analysis for evaluation; "llm" uses prompts/retrieval/query_analysis.md; "nlp" uses optional spaCy processing.

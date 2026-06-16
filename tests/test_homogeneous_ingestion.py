@@ -3,13 +3,13 @@ from __future__ import annotations
 import pytest
 import yaml
 
-from c_hypermem import Memory
-from c_hypermem.config import MemoryConfig
-from c_hypermem.pipeline.context import AssemblyContext
-from c_hypermem.pipeline.local_graph_builder import LocalGraphBuilder
-from c_hypermem.pipeline.node_builder import NodeBuilder
-from c_hypermem.stores.vector_store import VectorSearchHit, make_vector_point_id, node_local_graph_embedding_text
-from c_hypermem.schema import ExtractedNode, LocalNodeGraph, LocalTriple, MemoryExtraction, MemoryNode
+from comgmem import Memory
+from comgmem.config import MemoryConfig
+from comgmem.pipeline.context import AssemblyContext
+from comgmem.pipeline.local_graph_builder import LocalGraphBuilder
+from comgmem.pipeline.node_builder import NodeBuilder
+from comgmem.stores.vector_store import VectorSearchHit, make_vector_point_id, node_local_graph_embedding_text
+from comgmem.schema import ExtractedNode, LocalNodeGraph, LocalTriple, MemoryExtraction, MemoryNode
 
 
 def test_node_builder_builds_homogeneous_node_from_extracted_node():

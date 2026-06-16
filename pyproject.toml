@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "c-hypermem"
+name = "comgmem"
 version = "0.1.0"
 description = "Composite hypergraph memory for long-term conversational agents"
 readme = "README.md"
@@ -23,7 +23,7 @@ nlp = ["spacy>=3.7"]
 eval = []
 
 [tool.hatch.build.targets.wheel]
-packages = ["c_hypermem"]
+packages = ["comgmem"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

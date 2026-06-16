@@ -10,8 +10,8 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from c_hypermem import Memory
-from c_hypermem.config import MemoryConfig
+from comgmem import Memory
+from comgmem.config import MemoryConfig
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -24,7 +24,7 @@ DEFAULT_NAMESPACE_PREFIX = "longmemeval_s_cleaned_smoke_1"
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
-            "Run C-HyperMem end-to-end on longmemeval_s_cleaned_smoke_1.json: "
+            "Run ComGMem end-to-end on longmemeval_s_cleaned_smoke_1.json: "
             "build memory from all haystack sessions, then query each question."
         )
     )

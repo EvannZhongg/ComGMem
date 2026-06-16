@@ -13,8 +13,8 @@ from typing import Any
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from c_hypermem import Memory
-from c_hypermem.config import MemoryConfig
+from comgmem import Memory
+from comgmem.config import MemoryConfig
 
 
 DEFAULT_FIXTURE = PROJECT_ROOT / "examples" / "longmemeval_s_cleaned_smoke_dialogue_1.json"
@@ -25,7 +25,7 @@ DEFAULT_CONFIG = PROJECT_ROOT / "configs" / "default.yaml"
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
-            "Build C-HyperMem memory for one LongMemEval dialogue smoke fixture. "
+            "Build ComGMem memory for one LongMemEval dialogue smoke fixture. "
             "This runs ingestion, SQLite persistence, embeddings, and Qdrant vector indexing, "
             "but intentionally skips final retrieval/search."
         )
@@ -45,7 +45,7 @@ def main() -> None:
     run_dir.mkdir(parents=True, exist_ok=True)
     logger = _configure_logging(run_dir)
 
-    logger.info("C-HyperMem LongMemEval dialogue memory-build smoke")
+    logger.info("ComGMem LongMemEval dialogue memory-build smoke")
     logger.info("project_root=%s", PROJECT_ROOT)
     logger.info("fixture=%s", fixture)
     logger.info("config=%s", args.config.resolve())

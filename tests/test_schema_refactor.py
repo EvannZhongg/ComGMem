@@ -3,15 +3,15 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from c_hypermem.config import MemoryConfig
-from c_hypermem.pipeline.extraction import (
+from comgmem.config import MemoryConfig
+from comgmem.pipeline.extraction import (
     ExtractionContext,
     ExtractionWindow,
     LLMMemoryExtractor,
     normalize_extraction_payload,
 )
-from c_hypermem.schema import HyperEdge, MemoryExtraction
-from c_hypermem.schema import Message
+from comgmem.schema import HyperEdge, MemoryExtraction
+from comgmem.schema import Message
 
 
 def test_memory_extraction_accepts_nodes_and_edge_summaries():

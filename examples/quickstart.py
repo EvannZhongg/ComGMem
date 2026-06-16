@@ -9,11 +9,11 @@ from typing import Any
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from c_hypermem import Memory
-from c_hypermem.config import MemoryConfig, ModelConfig
-from c_hypermem.embeddings import EmbeddingModelClient
-from c_hypermem.llms.openai_compatible import OpenAICompatibleLLM
-from c_hypermem.pipeline.extraction import LLMMemoryExtractor
+from comgmem import Memory
+from comgmem.config import MemoryConfig, ModelConfig
+from comgmem.embeddings import EmbeddingModelClient
+from comgmem.llms.openai_compatible import OpenAICompatibleLLM
+from comgmem.pipeline.extraction import LLMMemoryExtractor
 
 
 DB_PATH = PROJECT_ROOT / "runs" / "quickstart.sqlite3"
@@ -120,7 +120,7 @@ def _quickstart_config() -> MemoryConfig:
     config = MemoryConfig.load(PROJECT_ROOT / "configs" / "default.yaml")
     data = config.model_dump(mode="json")
     data["storage"]["path"] = str(DB_PATH)
-    data["index"]["vector_store"]["collection_name"] = "c_hypermem_quickstart"
+    data["index"]["vector_store"]["collection_name"] = "comgmem_quickstart"
     return MemoryConfig.model_validate(data)
 
 

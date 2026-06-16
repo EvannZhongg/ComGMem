@@ -1,4 +1,4 @@
-# ComGMem (C-HyperMem)
+# ComGMem
 
 ComGMem 是一个面向长期对话 Agent 的复合超图记忆包。
 
@@ -13,7 +13,7 @@ ComGMem 是一个面向长期对话 Agent 的复合超图记忆包。
 
 ## 安装
 
-在 `C-HyperMem` 项目根目录执行：
+在 `ComGMem` 项目根目录执行：
 
 ```powershell
 python -m venv .venv
@@ -28,25 +28,25 @@ pip install -e ".[nlp]"
 python -m pip install https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl --target models/en_core_web_sm --no-deps
 ```
 
-`configs/models.yaml` 默认把 `nlp.model_path` 指向 `models/en_core_web_sm`。建议从 `C-HyperMem` 根目录运行脚本，避免相对路径解析偏移。
+`configs/models.yaml` 默认把 `nlp.model_path` 指向 `models/en_core_web_sm`。建议从 `ComGMem` 根目录运行脚本，避免相对路径解析偏移。
 
 ## 模型配置
 
-`configs/default.yaml` 会 include `configs/models.yaml` 和 `configs/node_labels.yaml`。默认配置会读取 `C-HyperMem/.env` 中的环境变量。
+`configs/default.yaml` 会 include `configs/models.yaml` 和 `configs/node_labels.yaml`。默认配置会读取 `ComGMem/.env` 中的环境变量。
 
 创建 `.env`，示例：
 
 ```powershell
-CHYPERMEM_LLM_MODEL=your-chat-model
-CHYPERMEM_LLM_BASE_URL=https://your-openai-compatible-endpoint/v1
-CHYPERMEM_LLM_API_KEY=your-api-key
+COMGMEM_LLM_MODEL=your-chat-model
+COMGMEM_LLM_BASE_URL=https://your-openai-compatible-endpoint/v1
+COMGMEM_LLM_API_KEY=your-api-key
 
-CHYPERMEM_EMBEDDING_MODEL=your-embedding-model
-CHYPERMEM_EMBEDDING_BASE_URL=https://your-openai-compatible-endpoint/v1
-CHYPERMEM_EMBEDDING_API_KEY=your-api-key
+COMGMEM_EMBEDDING_MODEL=your-embedding-model
+COMGMEM_EMBEDDING_BASE_URL=https://your-openai-compatible-endpoint/v1
+COMGMEM_EMBEDDING_API_KEY=your-api-key
 ```
 
-LLM 和 embedding 客户端都使用 OpenAI-compatible API。默认 SQLite 主存储路径是 `runs/c_hypermem/memory.sqlite3`，本地嵌入式 Qdrant 向量索引路径是 `runs/c_hypermem/vector_index`。
+LLM 和 embedding 客户端都使用 OpenAI-compatible API。默认 SQLite 主存储路径是 `runs/comgmem/memory.sqlite3`，本地嵌入式 Qdrant 向量索引路径是 `runs/comgmem/vector_index`。
 
 ## 快速自检
 
@@ -65,7 +65,7 @@ python examples\quickstart.py
 ## 基础使用
 
 ```python
-from c_hypermem import Memory
+from comgmem import Memory
 
 memory = Memory.from_config("configs/default.yaml")
 
@@ -129,11 +129,11 @@ memory.close()
 
 ## 自定义抽取器
 
-如果希望完全控制抽取结果，可以传入自定义 extractor。extractor 只需要返回 `MemoryExtraction`，后续 ID 生成、来源追踪、维护、存储和索引仍由 C-HyperMem 负责。
+如果希望完全控制抽取结果，可以传入自定义 extractor。extractor 只需要返回 `MemoryExtraction`，后续 ID 生成、来源追踪、维护、存储和索引仍由 ComGMem 负责。
 
 ```python
-from c_hypermem import Memory
-from c_hypermem.schema import MemoryExtraction
+from comgmem import Memory
+from comgmem.schema import MemoryExtraction
 
 
 class StaticExtractor:

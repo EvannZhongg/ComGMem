@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from c_hypermem.schema import LocalNodeGraph, LocalTriple, MemoryNode
-from c_hypermem.stores.sqlite_store import SQLiteStore
-from c_hypermem.utils.ids import make_local_triple_id, make_triple_semantic_key, semantic_triple_qualifiers
+from comgmem.schema import LocalNodeGraph, LocalTriple, MemoryNode
+from comgmem.stores.sqlite_store import SQLiteStore
+from comgmem.utils.ids import make_local_triple_id, make_triple_semantic_key, semantic_triple_qualifiers
 
 
 def test_local_triple_id_ignores_system_provenance_qualifiers():

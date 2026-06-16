@@ -1,6 +1,6 @@
 # 复合节点高阶关联 Memory 架构
 
-本文档描述 C-HyperMem 的记忆结构理念：为什么使用共享节点、节点内局部三元组、description-only HyperEdge 和 EdgeCluster。它不重复展开代码组织、配置字段、检索实现和测试覆盖：
+本文档描述 ComGMem 的记忆结构理念：为什么使用共享节点、节点内局部三元组、description-only HyperEdge 和 EdgeCluster。它不重复展开代码组织、配置字段、检索实现和测试覆盖：
 
 - 当前代码状态见 `docs/current_implementation.md`。
 - 工程边界和后续开发路线见 `docs/development_architecture.md`。
@@ -273,7 +273,7 @@ target interaction
 
 ## 8. 时间模型
 
-C-HyperMem 区分两类时间：
+ComGMem 区分两类时间：
 
 - world time：真实世界时间或有效期。
 - lifecycle / activation time：系统写入、更新、访问和 turn 相关时间。
@@ -331,7 +331,7 @@ C-HyperMem 区分两类时间：
 
 ## 10. 结构摘要
 
-C-HyperMem 的核心选择是：
+ComGMem 的核心选择是：
 
 ```text
 共享 MemoryNode
