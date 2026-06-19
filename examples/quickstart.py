@@ -14,9 +14,14 @@ from comgmem.config import MemoryConfig, ModelConfig
 from comgmem.embeddings import EmbeddingModelClient
 from comgmem.llms.openai_compatible import OpenAICompatibleLLM
 from comgmem.pipeline.extraction import LLMMemoryExtractor
+from comgmem.retrieval.query_analysis import LLMQueryAnalyzer
+from comgmem.schema import HyperEdge, MemoryExtraction
+from comgmem.utils.ids import make_local_triple_id, make_triple_semantic_key, semantic_triple_qualifiers
 
 
-DB_PATH = PROJECT_ROOT / "runs" / "quickstart.sqlite3"
+RUN_DIR = PROJECT_ROOT / "runs" / "quickstart"
+DB_PATH = RUN_DIR / "memory.sqlite3"
+VECTOR_INDEX_PATH = RUN_DIR / "vector_index"
 NAMESPACE = "quickstart"
 
 
@@ -58,6 +63,8 @@ class LoggingEmbeddingClient:
 
 
 def main() -> None:
+    _run_local_contract_checks()
+
     config = _quickstart_config()
     llm = LoggingLLM(_required_model(config.llm, "llm"))
     embedding = LoggingEmbeddingClient(_required_model(config.embedding, "embedding"))
@@ -67,6 +74,7 @@ def main() -> None:
     try:
         print("[quickstart] starting local smoke test")
         print(f"[quickstart] sqlite={DB_PATH}")
+        print(f"[quickstart] vector_index={VECTOR_INDEX_PATH}")
         print(f"[quickstart] namespace={NAMESPACE}")
 
         extractor = LLMMemoryExtractor(config, llm=llm)
@@ -89,6 +97,7 @@ def main() -> None:
         print("[quickstart] search")
         results = memory.search("What interview timing does Alice prefer?", namespace=NAMESPACE, top_k=3)
         stats = memory.stats(NAMESPACE)
+        _assert_memory_smoke_contract(stats, results)
 
         print("[quickstart] stats")
         print(json.dumps(stats, ensure_ascii=False, indent=2, sort_keys=True))
@@ -112,16 +121,98 @@ def main() -> None:
     finally:
         if memory is not None:
             memory.close()
-        _delete_sqlite_files(DB_PATH)
-        print(f"[quickstart] deleted {DB_PATH}")
+        _delete_quickstart_run_dir(RUN_DIR)
+        print(f"[quickstart] deleted {RUN_DIR}")
 
 
 def _quickstart_config() -> MemoryConfig:
     config = MemoryConfig.load(PROJECT_ROOT / "configs" / "default.yaml")
     data = config.model_dump(mode="json")
     data["storage"]["path"] = str(DB_PATH)
+    data["index"]["vector_store"]["path"] = str(VECTOR_INDEX_PATH)
     data["index"]["vector_store"]["collection_name"] = "comgmem_quickstart"
     return MemoryConfig.model_validate(data)
+
+
+def _run_local_contract_checks() -> None:
+    print("[quickstart] local contract checks")
+
+    extraction = MemoryExtraction.model_validate(
+        {
+            "edge_summaries": [{"ref": " e1 ", "description": "Alice's scheduling preference."}],
+            "nodes": [
+                {
+                    "ref": " n1 ",
+                    "labels": [" preference ", ""],
+                    "canonical_text": " Alice prefers morning interviews. ",
+                    "summaries": [" Alice prefers morning interviews. "],
+                    "triples": [{"subject": "Alice", "predicate": "prefers", "object": "morning interviews"}],
+                    "edge_summary_refs": [" e1 "],
+                }
+            ],
+        }
+    )
+    assert extraction.nodes[0].ref == "n1"
+    assert extraction.nodes[0].labels == ["preference"]
+    assert extraction.edge_summaries[0].ref == "e1"
+
+    hyper_edge_fields = set(HyperEdge.model_fields)
+    assert {"description", "node_ids", "metadata"} <= hyper_edge_fields
+    assert {"edge_type", "relation", "roles", "polarity"}.isdisjoint(hyper_edge_fields)
+
+    semantic_qualifiers = {"valid_time": {"as_of": "2024-01-03"}}
+    with_provenance = {
+        **semantic_qualifiers,
+        "source_turn_ids": ["turn:0"],
+        "source_triple_ids": ["source-triple:old"],
+        "maintenance_last_action": "duplicate_spo",
+    }
+    assert semantic_triple_qualifiers(with_provenance) == semantic_qualifiers
+    assert make_local_triple_id("ns", "node:1", "Alice", "likes", "Tea", semantic_qualifiers) == make_local_triple_id(
+        "ns",
+        "node:1",
+        " Alice ",
+        "LIKES",
+        "tea",
+        with_provenance,
+    )
+    assert make_triple_semantic_key("ns", "node:1", " Alice ", "LIKES", "tea", with_provenance)["qualifiers"] == (
+        semantic_qualifiers
+    )
+
+    llm = _RecordingLLM(
+        [
+            [],
+            {
+                "normalized_query": "alice interviews",
+                "bm25_query": "alice interviews",
+                "entities": [{"type": "person", "text": "Alice"}],
+                "attributes": {"intent": "retrieve_preference"},
+            },
+        ]
+    )
+    analysis = LLMQueryAnalyzer(
+        llm=llm,
+        llm_config=ModelConfig(model="test-model", retry_attempts=2),
+        prompt_registry=_StaticPromptRegistry(),
+    ).analyze("What interview time does Alice prefer?")
+    assert analysis.normalized_query == "alice interviews"
+    assert analysis.entities == [{"type": "person", "text": "Alice"}]
+    assert len(llm.prompts) == 2
+
+
+def _assert_memory_smoke_contract(stats: dict[str, Any], results: list[dict[str, Any]]) -> None:
+    assert stats["nodes"] > 0
+    assert stats["hyper_edges"] > 0
+    assert results
+
+    top = results[0]
+    assert top["metadata"]["edge_id"]
+    assert top["metadata"]["edge_nodes"]
+    assert "current_turn_id=turn:" in top["content"]
+    assert "edge_type" not in top["metadata"]
+    assert "edge_relation" not in top["metadata"]
+    assert "edge_roles" not in top["metadata"]
 
 
 def _required_model(config: ModelConfig | None, name: str) -> ModelConfig:
@@ -155,10 +246,33 @@ def _compact_results(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return compacted
 
 
-def _delete_sqlite_files(path: Path) -> None:
-    for candidate in (path, path.with_name(f"{path.name}-wal"), path.with_name(f"{path.name}-shm")):
-        if candidate.exists():
-            candidate.unlink()
+def _delete_quickstart_run_dir(path: Path) -> None:
+    if path.exists():
+        import shutil
+
+        shutil.rmtree(path)
+
+
+class _RecordingLLM:
+    def __init__(self, payloads: list[Any]) -> None:
+        self.payloads = list(payloads)
+        self.prompts: list[str] = []
+
+    def generate_json(self, prompt: str) -> Any:
+        self.prompts.append(prompt)
+        if not self.payloads:
+            raise AssertionError("Unexpected LLM call")
+        return self.payloads.pop(0)
+
+
+class _StaticPrompt:
+    text = "Analyze: {{QUERY}}"
+
+
+class _StaticPromptRegistry:
+    def load(self, prompt_id: str) -> _StaticPrompt:
+        assert prompt_id == "retrieval.query_analysis"
+        return _StaticPrompt()
 
 
 if __name__ == "__main__":
