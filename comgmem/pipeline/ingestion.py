@@ -69,6 +69,23 @@ class IngestionPipeline:
             current_turn=current_turn,
         )
 
+    def ingest_messages(
+        self,
+        messages: list[Message],
+        *,
+        namespace: str,
+        metadata: dict[str, Any],
+        current_turn: int,
+        recent_messages: list[Message] | None = None,
+    ) -> IngestionOutput:
+        return self._ingest_messages(
+            messages,
+            recent_messages=recent_messages,
+            namespace=namespace,
+            metadata=metadata,
+            current_turn=current_turn,
+        )
+
     def _ingest_messages(
         self,
         messages: list[Message],

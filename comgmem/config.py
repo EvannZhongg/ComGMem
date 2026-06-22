@@ -25,6 +25,7 @@ class ModelConfig(BaseModel):
     model: str
     base_url: str | None = None
     api_key: str | None = None
+    max_tokens: int | None = Field(default=None, ge=1)
     batch_size: int = 10
     retry_attempts: int = 3
     retry_backoff_base_sec: float = 2.0
@@ -33,6 +34,11 @@ class ModelConfig(BaseModel):
 
 class TokenCountingConfig(BaseModel):
     tokenizer_encoding: str = "cl100k_base"
+
+
+class LoggingConfig(BaseModel):
+    enabled: bool = True
+    path: str = "runs/comgmem/logs"
 
 
 class NLPConfig(BaseModel):
@@ -154,6 +160,7 @@ class MemoryConfig(BaseModel):
     llm: ModelConfig | None = None
     embedding: ModelConfig | None = None
     token_counting: TokenCountingConfig = Field(default_factory=TokenCountingConfig)
+    logging: LoggingConfig = Field(default_factory=LoggingConfig)
     nlp: NLPConfig = Field(default_factory=NLPConfig)
     ingestion: IngestionConfig = Field(default_factory=IngestionConfig)
     extraction: ExtractionConfig = Field(default_factory=ExtractionConfig)

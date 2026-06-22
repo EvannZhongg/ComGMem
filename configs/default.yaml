@@ -6,6 +6,10 @@ storage:
   backend: sqlite
   path: runs/comgmem/memory.sqlite3
 
+logging:
+  enabled: true
+  path: runs/comgmem/logs
+
 ingestion:
   pass_recent_context: false
   context_window_messages: 3

@@ -479,6 +479,8 @@ def _turn_dialogue_role_label(role: str) -> str | None:
         return "User"
     if normalized == "assistant":
         return "Assistant"
+    if normalized == "dialogue_summary":
+        return "Dialogue summary"
     return None
 
 

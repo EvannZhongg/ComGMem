@@ -7,7 +7,6 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from comgmem.config import MemoryConfig
-from comgmem.errors import ConfigError
 from comgmem.llms.base import LLMClient
 from comgmem.llms.retrying import generate_json_with_parse_retries
 from comgmem.pipeline.context import AssemblyContext
@@ -19,6 +18,7 @@ from comgmem.schema import HyperEdge, LocalTriple, MemoryNode
 from comgmem.utils.ids import make_local_triple_id, make_source_triple_id, semantic_triple_qualifiers
 from comgmem.utils.prompts import PromptRegistry
 from comgmem.utils.text import normalize_text
+from comgmem.utils.token_counting import TikTokenCounter, TokenCounter
 from comgmem.utils.time import touch_node_update, utc_now_iso
 
 
@@ -637,23 +637,6 @@ def _align_local_triple_merge_decisions(
         )
 
     return [decisions_by_ref[ref] for ref in expected_refs]
-
-
-class TokenCounter:
-    def count(self, text: str) -> int:
-        raise NotImplementedError
-
-
-class TikTokenCounter(TokenCounter):
-    def __init__(self, encoding_name: str) -> None:
-        try:
-            import tiktoken
-        except ImportError as exc:
-            raise ConfigError("Install tiktoken to use node summary token-limit maintenance.") from exc
-        self.encoding = tiktoken.get_encoding(encoding_name)
-
-    def count(self, text: str) -> int:
-        return len(self.encoding.encode(text))
 
 
 def _summary_state(node: MemoryNode) -> dict[str, Any]:

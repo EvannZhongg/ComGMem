@@ -17,6 +17,7 @@ class PromptRegistry:
     PROMPT_PATHS = {
         "extraction.memory": "extraction/memory_extraction.md",
         "retrieval.query_analysis": "retrieval/query_analysis.md",
+        "compression.token_limit_compaction": "compression/token_limit_compaction.md",
         "maintenance.node_summary_compaction": "maintenance/node_summary_compaction.md",
         "maintenance.local_triple_merge": "maintenance/local_triple_merge.md",
         "maintenance.hyper_edge_description_compaction": "maintenance/hyper_edge_description_compaction.md",
