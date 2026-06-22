@@ -74,6 +74,29 @@ def test_memory_storage_log_records_compaction_token_usage(tmp_path):
     memory.close()
 
 
+def test_memory_storage_log_defaults_to_storage_parent_directory(tmp_path):
+    run_dir = tmp_path / "quickstart"
+    memory = Memory(
+        MemoryConfig(
+            storage={"path": str(run_dir / "memory.sqlite3")},
+            embedding={"model": "test-embedding", "max_tokens": 1000},
+            index={"use_embedding": True},
+            ingestion={"pass_recent_context": False},
+        ),
+        extractor=_EmptyExtractor(),
+        embedding_client=_EmbeddingClient(),
+        vector_store=_VectorStore(),
+    )
+
+    memory.add("remember quickstart path", namespace="quickstart")
+
+    record = _read_single_log_record(run_dir / "quickstart" / "memory_writes.jsonl")
+    assert record["namespace"] == "quickstart"
+    assert record["operation"] == "add"
+
+    memory.close()
+
+
 def _read_single_log_record(path: Path) -> dict[str, Any]:
     rows = path.read_text(encoding="utf-8").splitlines()
     assert len(rows) == 1

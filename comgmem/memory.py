@@ -72,7 +72,7 @@ class Memory:
         if compression_llm is None and config.llm is not None:
             compression_llm = OpenAICompatibleLLM(config.llm)
         self.compressor = TokenLimitCompressor(config, llm=compression_llm)
-        self.memory_log_writer = NamespaceMemoryLogWriter(config.logging)
+        self.memory_log_writer = NamespaceMemoryLogWriter(config.logging, base_path=_log_base_path(config))
         self._token_counter: TokenCounter | None = None
         self.ingestion = IngestionPipeline(
             config,
@@ -708,6 +708,12 @@ def _ingestion_message_max_tokens(config: MemoryConfig) -> int | None:
     if config.index.use_embedding and config.embedding is not None and config.embedding.max_tokens is not None:
         limits.append(config.embedding.max_tokens)
     return min(limits) if limits else None
+
+
+def _log_base_path(config: MemoryConfig) -> Path:
+    if config.logging.path is not None:
+        return Path(config.logging.path)
+    return Path(config.storage.path).parent
 
 
 def _unique_vector_stores(stores: dict[str, VectorStore]) -> list[VectorStore]:

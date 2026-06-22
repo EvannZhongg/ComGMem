@@ -38,7 +38,7 @@ class TokenCountingConfig(BaseModel):
 
 class LoggingConfig(BaseModel):
     enabled: bool = True
-    path: str = "runs/comgmem/logs"
+    path: str | None = None
 
 
 class NLPConfig(BaseModel):

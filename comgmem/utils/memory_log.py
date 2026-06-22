@@ -9,9 +9,9 @@ from comgmem.config import LoggingConfig
 
 
 class NamespaceMemoryLogWriter:
-    def __init__(self, config: LoggingConfig) -> None:
+    def __init__(self, config: LoggingConfig, *, base_path: str | Path) -> None:
         self.config = config
-        self.base_path = Path(config.path)
+        self.base_path = Path(base_path)
 
     def write(self, namespace: str, record: dict[str, Any]) -> None:
         if not self.config.enabled:

@@ -8,7 +8,6 @@ storage:
 
 logging:
   enabled: true
-  path: runs/comgmem/logs
 
 ingestion:
   pass_recent_context: false
